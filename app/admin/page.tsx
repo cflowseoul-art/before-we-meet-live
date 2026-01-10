@@ -1,232 +1,212 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect } from "react";
 import { supabase } from "@/lib/supabase";
 import { VALUES } from "@/app/constants";
 
 export default function AdminPage() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [passwordInput, setPasswordInput] = useState("");
-  const [activeTab, setActiveTab] = useState<'controller' | 'stats'>('controller');
+  const [activeTab, setActiveTab] = useState<'status' | 'control'>('status');
   const [items, setItems] = useState<any[]>([]);
   const [users, setUsers] = useState<any[]>([]);
   const [bids, setBids] = useState<any[]>([]);
   const [isRealtimeConnected, setIsRealtimeConnected] = useState(false);
-  
-  const usersRef = useRef<any[]>([]);
-  const itemsRef = useRef<any[]>([]);
-
-  useEffect(() => {
-    usersRef.current = users;
-    itemsRef.current = items;
-  }, [users, items]);
 
   const fetchData = async () => {
     const { data: itemsData } = await supabase.from("auction_items").select("*");
+    const { data: usersData } = await supabase.from("users").select("*");
+    const { data: bidsData } = await supabase.from("bids").select("*").order("created_at", { ascending: false }).limit(4);
+
     if (itemsData) {
-      const sorted = [...itemsData].sort((a, b) => {
+      setItems(itemsData.sort((a, b) => {
         const order: any = { active: 1, pending: 2, finished: 3 };
         return order[a.status] - order[b.status];
-      });
-      setItems(sorted);
+      }));
     }
 
-    const { data: usersData } = await supabase.from("users").select("*").order("balance", { ascending: false });
-    if (usersData) setUsers(usersData);
-
-    const { data: bidsData } = await supabase
-      .from("bids")
-      .select("*")
-      .order("created_at", { ascending: false })
-      .limit(10);
-    
+    if (usersData && itemsData) {
+      const rankedUsers = usersData.map(user => {
+        const myItems = itemsData.filter(item => item.status === 'finished' && item.highest_bidder_id === user.id);
+        return { ...user, awardedItems: myItems, count: myItems.length };
+      }).sort((a, b) => b.count - a.count || b.balance - a.balance);
+      setUsers(rankedUsers);
+    }
     if (bidsData) setBids(bidsData);
   };
 
   useEffect(() => {
-    // 세션에서 인증 정보 확인
     const auth = sessionStorage.getItem("admin_auth");
     if (auth === "true") setIsAuthenticated(true);
-
     fetchData();
 
-    const generalChannel = supabase
-      .channel("admin_general_changes")
-      .on("postgres_changes", { event: "*", schema: "public", table: "auction_items" }, () => fetchData())
-      .on("postgres_changes", { event: "*", schema: "public", table: "users" }, () => fetchData())
-      .subscribe();
-
-    const bidsChannel = supabase
-      .channel("admin_bids_insert")
-      .on("postgres_changes", { event: "INSERT", schema: "public", table: "bids" }, (payload) => {
-        console.table(payload.new);
-        setBids((prev) => [payload.new, ...prev.slice(0, 9)]);
-        fetchData(); 
-      })
-      .subscribe((status) => {
-        setIsRealtimeConnected(status === 'SUBSCRIBED');
-      });
+    const channel = supabase.channel("admin_final_visibility_v3")
+      .on("postgres_changes", { event: "*", schema: "public" }, () => fetchData())
+      .subscribe((status) => setIsRealtimeConnected(status === 'SUBSCRIBED'));
     
-    return () => { 
-      supabase.removeChannel(generalChannel);
-      supabase.removeChannel(bidsChannel);
-    };
+    return () => { supabase.removeChannel(channel); };
   }, []);
 
-  // 패스워드 핸들러
-  const handleLogin = (e: React.FormEvent) => {
+  const handleLogin = (e: any) => {
     e.preventDefault();
-    if (passwordInput === "1234") { // 설정하신 패스워드
-      setIsAuthenticated(true);
-      sessionStorage.setItem("admin_auth", "true");
-    } else {
-      alert("비밀번호가 틀렸습니다.");
-    }
+    if (passwordInput === "1234") { setIsAuthenticated(true); sessionStorage.setItem("admin_auth", "true"); }
+    else alert("Passcode Incorrect");
   };
 
   const updateStatus = async (id: string, status: string) => {
-    if (status === "active") {
-      await supabase.from("auction_items").update({ status: "pending" }).eq("status", "active");
-    }
     await supabase.from("auction_items").update({ status }).eq("id", id);
+    fetchData();
   };
 
-  // --- 1. 패스워드 인증 전 화면 ---
+  const handleAuctionReset = async () => {
+    if (!confirm("🚨 모든 데이터를 초기화하시겠습니까?")) return;
+    await supabase.from('bids').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+    await supabase.from('auction_items').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+    const newItems = VALUES.map((v: any) => ({ title: v.title || v, status: 'pending', current_bid: 0 }));
+    await supabase.from('auction_items').insert(newItems);
+    alert("시스템이 초기화되었습니다.");
+    fetchData();
+  };
+
   if (!isAuthenticated) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-950 p-4">
-        <form onSubmit={handleLogin} className="bg-white p-10 rounded-[2.5rem] shadow-2xl w-full max-w-md border-4 border-gray-800">
-          <h1 className="text-3xl font-black text-center text-gray-900 mb-8 tracking-tighter italic">ADMIN LOGIN</h1>
-          <input 
-            type="password" 
-            value={passwordInput} 
-            onChange={(e) => setPasswordInput(e.target.value)} 
-            placeholder="비밀번호 입력" 
-            className="w-full p-5 bg-gray-100 rounded-2xl mb-4 text-center text-2xl font-bold outline-none border-4 border-transparent focus:border-blue-600 transition-all" 
-            autoFocus 
-          />
-          <button type="submit" className="w-full bg-blue-600 text-white py-5 rounded-2xl font-black text-xl hover:bg-blue-700 shadow-xl active:scale-95 transition-all">
-            접속하기
-          </button>
+      <main className="min-h-screen flex items-center justify-center bg-[#1A1A1A] p-10 font-serif">
+        <form onSubmit={handleLogin} className="bg-[#FCF9F2] p-12 rounded-[3.5rem] border-t-[12px] border-[#A52A2A] text-center w-full max-w-sm shadow-2xl">
+          <h1 className="text-3xl italic mb-10 tracking-tighter text-[#1A1A1A]">Private Hall Entrance</h1>
+          <input type="password" value={passwordInput} onChange={(e) => setPasswordInput(e.target.value)} className="w-full p-5 bg-white border-2 border-[#EEEBDE] rounded-2xl mb-5 text-center text-4xl outline-none focus:border-[#A52A2A] transition-all" placeholder="••••" autoFocus />
+          <button type="submit" className="w-full bg-[#A52A2A] text-white py-5 rounded-2xl font-sans font-black tracking-widest text-xs uppercase shadow-lg active:scale-95 transition-all">Verify</button>
         </form>
-      </div>
+      </main>
     );
   }
 
-  // --- 2. 패스워드 인증 후 대시보드 화면 ---
+  const activeItem = items.find(i => i.status === 'active');
+
   return (
-    <div className="min-h-screen bg-gray-50 p-6">
-      <div className="max-w-6xl mx-auto">
-        {/* 공지사항 상단 고정 */}
-        <div className="bg-blue-600 text-white p-4 rounded-2xl mb-6 shadow-lg flex justify-between items-center border-b-4 border-blue-800">
-          <div className="flex items-center gap-3">
-            <span className="text-2xl">📢</span>
-            <p className="font-bold text-sm md:text-base tracking-tight">
-              "자산 1,000만원 / 100만원 단위 배팅 / 낙찰 후 취소 불가" - 가치관 경매 안내
-            </p>
-          </div>
-          <div className="flex items-center gap-2 bg-blue-700 px-3 py-1.5 rounded-full border border-blue-500">
-            <div className={`w-2.5 h-2.5 rounded-full ${isRealtimeConnected ? 'bg-green-400 animate-pulse shadow-[0_0_8px_rgba(74,222,128,0.8)]' : 'bg-red-400'}`}></div>
-            <span className="text-xs font-black uppercase tracking-widest">{isRealtimeConnected ? 'Live' : 'Offline'}</span>
-          </div>
-        </div>
-
-        <header className="flex justify-between items-center mb-10">
-          <h1 className="text-2xl font-black italic tracking-tighter text-gray-900">THE VALUE AUCTION <span className="text-blue-600">ADMIN</span></h1>
-          <div className="flex bg-white p-1.5 rounded-2xl shadow-sm border border-gray-200">
-            <button onClick={() => setActiveTab('controller')} className={`px-6 py-2.5 rounded-xl font-bold transition-all ${activeTab === 'controller' ? 'bg-black text-white shadow-lg' : 'text-gray-400 hover:text-black'}`}>컨트롤러</button>
-            <button onClick={() => setActiveTab('stats')} className={`px-6 py-2.5 rounded-xl font-bold transition-all ${activeTab === 'stats' ? 'bg-black text-white shadow-lg' : 'text-gray-400 hover:text-black'}`}>실시간 통계</button>
-          </div>
-        </header>
-
-        {activeTab === 'controller' ? (
-          <div className="space-y-4">
-            <div className="flex items-center gap-2 mb-4">
-               <h2 className="text-xl font-black text-gray-800">🎮 경매 컨트롤러</h2>
-               <span className="text-xs text-gray-400 font-medium">| 아이템 정렬: 진행중 ⮕ 대기 ⮕ 종료</span>
-            </div>
-            {items.map((item) => (
-              <div key={item.id} className={`p-5 border-2 rounded-2xl flex justify-between items-center transition-all ${item.status === 'active' ? 'bg-blue-50 border-blue-600 ring-4 ring-blue-100 scale-[1.01]' : 'bg-white border-gray-100 opacity-90'}`}>
-                <div>
-                  <span className="font-black text-xl text-gray-900">[{item.title}]</span>
-                  <span className={`ml-3 px-3 py-1 rounded-full text-[10px] font-black tracking-widest ${item.status === 'active' ? 'bg-green-500 text-white animate-pulse' : item.status === 'finished' ? 'bg-gray-400 text-white' : 'bg-yellow-100 text-yellow-800'}`}>
-                    {item.status.toUpperCase()}
-                  </span>
-                  <div className="text-sm text-gray-500 mt-2 font-bold italic">현재가: <span className="text-blue-600 text-lg not-italic">{item.current_bid}만원</span></div>
-                </div>
-                <div className="flex gap-2">
-                  <button onClick={() => updateStatus(item.id, "active")} className="px-6 py-3 bg-blue-600 text-white rounded-xl font-black hover:bg-blue-700 shadow-md transition-all active:scale-90">시작</button>
-                  <button onClick={() => updateStatus(item.id, "finished")} className="px-6 py-3 bg-red-500 text-white rounded-xl font-black hover:bg-red-600 shadow-md transition-all active:scale-90">종료</button>
-                </div>
-              </div>
-            ))}
-          </div>
-        ) : (
-          <div className="space-y-8">
-            {/* 실시간 입찰 로그 (전광판) */}
-            <div className="bg-black text-green-400 p-8 rounded-[2rem] shadow-2xl border-x-8 border-gray-900 relative overflow-hidden">
-              <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-green-500 to-transparent opacity-20"></div>
-              <div className="flex justify-between items-center mb-6 border-b border-gray-800 pb-3">
-                <h2 className="text-xs font-black tracking-[0.3em] text-gray-600 uppercase">📢 LIVE BIDDING FEED</h2>
-                <div className="flex items-center gap-2">
-                  <div className={`w-2 h-2 rounded-full ${isRealtimeConnected ? 'bg-green-500 animate-pulse' : 'bg-red-500'}`}></div>
-                  <span className="text-[10px] text-gray-500 font-bold">{isRealtimeConnected ? 'LIVE' : 'OFFLINE'}</span>
-                </div>
-              </div>
-              <div className="space-y-4 min-h-[160px]">
-                {bids.length > 0 ? bids.map((bid) => {
-                  const bidder = users.find(u => u.id === bid.user_id);
-                  const itemId = bid.auction_item_id || bid.item_id;
-                  const item = items.find(i => i.id === itemId);
-                  return (
-                    <div key={bid.id} className="text-xl font-mono flex items-center gap-4 animate-fadeIn border-l-2 border-gray-900 pl-4">
-                      <span className="text-gray-700 text-xs">[{new Date(bid.created_at).toLocaleTimeString()}]</span>
-                      <span className="text-yellow-400 font-black">{bidder?.nickname || '익명'}</span>
-                      <span className="text-gray-500 italic text-sm">bid on</span>
-                      <span className="text-blue-400 font-black tracking-tighter">[{item?.title || '가치관'}]</span>
-                      <span className="text-green-400 font-black text-2xl">{bid.amount}만원!</span>
-                    </div>
-                  );
-                }) : <p className="text-gray-700 italic text-center py-10">Waiting for first bid...</p>}
-              </div>
-            </div>
-
-            {/* 통계 그래프 & 랭킹 */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-              <div className="bg-white p-8 rounded-3xl shadow-sm border border-gray-100">
-                <h2 className="text-xl font-black mb-6 text-gray-800">📊 가치관별 누적 금액</h2>
-                <div className="space-y-6">
-                  {[...items].sort((a,b) => b.current_bid - a.current_bid).slice(0, 8).map((item) => (
-                    <div key={item.id}>
-                      <div className="flex justify-between text-sm mb-2 font-black">
-                        <span>{item.title}</span>
-                        <span className="text-blue-600">{item.current_bid}만원</span>
-                      </div>
-                      <div className="w-full bg-gray-100 rounded-full h-4 overflow-hidden">
-                        <div className="bg-gradient-to-r from-blue-500 to-indigo-600 h-full transition-all duration-1000" style={{ width: `${(item.current_bid / Math.max(...items.map(i => i.current_bid), 100)) * 100}%` }}></div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              <div className="bg-white p-8 rounded-3xl shadow-sm border border-gray-100">
-                <h2 className="text-xl font-black mb-6 text-gray-800">💰 자산 랭킹</h2>
-                <div className="divide-y divide-gray-50">
-                  {users.map((u, idx) => (
-                    <div key={u.id} className="flex justify-between items-center py-4">
-                      <div className="flex items-center gap-4">
-                        <span className={`w-8 h-8 rounded-full flex items-center justify-center font-black text-sm ${idx === 0 ? 'bg-yellow-400 text-white' : 'bg-gray-100 text-gray-400'}`}>{idx + 1}</span>
-                        <span className="font-bold text-gray-700 text-lg">{u.nickname}</span>
-                      </div>
-                      <span className="text-green-600 font-black text-xl">{u.balance}만원</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
+    <div className="min-h-screen bg-[#FDFDFD] text-[#1A1A1A] font-serif antialiased overflow-x-hidden flex flex-col relative pb-32">
+      
+      {/* 1. 상단 LIVE 게시판: 요청하신 문구형 입찰 알림 적용 */}
+      <section className="sticky top-0 z-50 bg-[#121212] px-6 py-8 border-b-[8px] border-[#A52A2A] shadow-2xl">
+        {activeItem && (
+          <div className="mb-10 p-6 bg-[#A52A2A]/5 border border-[#A52A2A]/20 rounded-[2.5rem] text-center animate-in fade-in zoom-in duration-700">
+            <p className="text-[#A52A2A] text-[10px] font-sans font-black tracking-[0.4em] uppercase mb-3 leading-none opacity-60">현재 경매 중</p>
+            <h2 className="text-[#FFD700] text-5xl italic font-medium tracking-tighter mb-4 leading-none">{activeItem.title}</h2>
+            <div className="flex items-center justify-center gap-2">
+              <span className="text-white/40 text-[10px] font-sans tracking-widest uppercase">현재가</span>
+              <span className="text-white text-xl font-sans font-bold tracking-tight">{activeItem.current_bid.toLocaleString()}만원</span>
             </div>
           </div>
         )}
+
+        <div className="space-y-6 h-40 overflow-hidden relative">
+          {bids.map((bid, idx) => {
+            const bidder = users.find(u => u.id === bid.user_id);
+            const item = items.find(i => i.id === (bid.auction_item_id || bid.item_id));
+            return (
+              <div key={bid.id} className={`flex flex-col gap-1 transition-all duration-700 ${idx === 0 ? 'opacity-100 scale-100' : 'opacity-20 scale-95'}`}>
+                <div className="flex justify-between items-baseline">
+                  <div className="flex flex-wrap items-baseline gap-x-2 min-w-0 pr-2">
+                    {/* 닉네임 {가치관} 입찰 성공 구조 */}
+                    <span className="text-[#FFD700] font-serif italic font-bold text-2xl tracking-tight break-all">
+                      {bidder?.nickname}
+                    </span>
+                    <span className="text-white font-bold text-lg italic tracking-tighter shrink-0 border-b border-white/20">
+                      {item?.title}
+                    </span>
+                    <span className="text-[#A52A2A] text-[10px] font-sans font-black tracking-widest uppercase shrink-0">
+                      입찰 성공
+                    </span>
+                  </div>
+                  <span className="text-white font-sans font-black text-2xl tracking-tighter shrink-0">
+                    {bid.amount}<span className="text-[10px] ml-0.5 opacity-40 font-normal">만원</span>
+                  </span>
+                </div>
+              </div>
+            );
+          })}
+          <div className="absolute bottom-0 left-0 w-full h-12 bg-gradient-to-t from-[#121212] via-[#121212]/80 to-transparent pointer-events-none"></div>
+        </div>
+      </section>
+
+      {/* 2. 메인 콘텐츠 (기존 UI 유지) */}
+      <div className="flex-1 px-5 mt-12 max-w-xl mx-auto w-full">
+        {activeTab === 'status' ? (
+          <div className="space-y-16 animate-in fade-in duration-1000">
+            {/* 누적 입찰액 통계 */}
+            <section>
+              <h3 className="text-[10px] font-sans font-black tracking-[0.5em] text-[#A52A2A] uppercase mb-10 text-center italic underline underline-offset-8 decoration-[#A52A2A]/20">Value Statistics</h3>
+              <div className="space-y-8 bg-white p-9 rounded-[3.5rem] border border-[#EEEBDE] shadow-sm">
+                {[...items].sort((a, b) => b.current_bid - a.current_bid).slice(0, 4).map((item) => (
+                  <div key={item.id} className="space-y-3">
+                    <div className="flex justify-between items-end text-sm font-medium italic">
+                      <span className="tracking-tight">{item.title}</span>
+                      <span className="text-[#A52A2A] font-sans font-bold text-xs">{item.current_bid}만</span>
+                    </div>
+                    <div className="w-full bg-[#FCF9F2] h-[2px] rounded-full overflow-hidden">
+                      <div className="bg-[#A52A2A] h-full opacity-60 transition-all duration-1000" style={{ width: `${Math.min((item.current_bid / 1000) * 100, 100)}%` }}></div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </section>
+
+            {/* 가치관 획득 랭킹 */}
+            <section>
+              <h3 className="text-[10px] font-sans font-black tracking-[0.5em] text-gray-300 uppercase mb-10 text-center italic">Identity Ranking</h3>
+              <div className="space-y-6 text-center">
+                {users.map((user, idx) => (
+                  <div key={user.id} className="bg-white p-8 rounded-[3rem] border border-[#EEEBDE] relative overflow-hidden group shadow-sm text-left">
+                    <span className="absolute -right-4 -bottom-8 text-[9rem] font-black text-black/[0.02] italic font-serif pointer-events-none">{idx + 1}</span>
+                    <div className="relative z-10">
+                      <div className="flex justify-between items-start mb-4">
+                         <h4 className="text-2xl font-medium italic tracking-tighter break-all leading-tight pr-4">{user.nickname}</h4>
+                         <span className="shrink-0 text-[9px] font-sans font-black text-[#A52A2A] bg-[#FDF8F8] px-3 py-1.5 rounded-full border border-[#A52A2A]/10 uppercase">{user.count} Won</span>
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        {user.awardedItems?.map((item: any) => (
+                          <span key={item.id} className="px-4 py-2 rounded-full border border-[#EEEBDE] bg-[#FDFDFD] text-[10px] font-sans font-bold text-[#A52A2A] shadow-sm italic">{item.title}</span>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </section>
+          </div>
+        ) : (
+          /* 컨트롤러 */
+          <div className="space-y-6">
+             <h3 className="text-[10px] font-sans font-black tracking-[0.5em] text-[#A52A2A] uppercase mb-10 text-center italic">Auction Inventory</h3>
+             {items.map((item) => (
+              <div key={item.id} className={`p-8 bg-white rounded-[3rem] border border-[#EEEBDE] flex justify-between items-center ${item.status === 'active' ? 'ring-2 ring-[#A52A2A]/20 shadow-xl' : 'opacity-60'}`}>
+                <div className="min-w-0 flex-1 pr-4 text-left">
+                  <h3 className="text-xl font-medium italic tracking-tighter break-words leading-none mb-2">{item.title}</h3>
+                  <div className="flex items-center gap-2">
+                    <span className={`px-2 py-0.5 rounded text-[8px] font-sans font-black uppercase tracking-widest ${item.status === 'active' ? 'bg-[#A52A2A] text-white animate-pulse' : 'bg-gray-100 text-gray-400'}`}>{item.status}</span>
+                    <span className="text-[10px] font-sans font-bold text-gray-300 uppercase italic">{item.current_bid}만원</span>
+                  </div>
+                </div>
+                <div className="flex gap-2">
+                  <button onClick={() => updateStatus(item.id, 'active')} className="px-5 py-3 rounded-xl bg-[#1A1A1A] text-white text-[9px] font-sans font-black uppercase shadow-md active:scale-95 transition-all">Start</button>
+                  <button onClick={() => updateStatus(id, 'finished')} className="px-5 py-3 rounded-xl border border-[#EEEBDE] text-[9px] font-sans font-black uppercase active:scale-95 transition-all">End</button>
+                </div>
+              </div>
+            ))}
+            <div className="mt-24 pt-12 border-t border-dashed border-[#EEEBDE] text-center">
+              <button onClick={handleAuctionReset} className="text-[9px] font-sans font-black tracking-[0.4em] text-[#A52A2A]/20 hover:text-[#A52A2A]/60 uppercase transition-all underline underline-offset-8">
+                Initialize Hall of Identity
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* 3. 플로팅 내비게이션 */}
+      <div className="fixed bottom-10 right-7 z-[100] flex flex-col items-end gap-4">
+        <div className="flex bg-white/60 backdrop-blur-xl p-2 rounded-[2.5rem] border border-white/30 shadow-xl opacity-70 hover:opacity-100 transition-all duration-500">
+          <button onClick={() => setActiveTab('status')} className={`px-6 py-3.5 rounded-[1.8rem] text-[10px] font-sans font-black tracking-widest uppercase transition-all ${activeTab === 'status' ? 'bg-[#1A1A1A] text-white shadow-lg' : 'text-[#1A1A1A]/40'}`}>Stats</button>
+          <button onClick={() => setActiveTab('control')} className={`px-6 py-3.5 rounded-[1.8rem] text-[10px] font-sans font-black tracking-widest uppercase transition-all ${activeTab === 'control' ? 'bg-[#1A1A1A] text-white shadow-lg' : 'text-[#1A1A1A]/40'}`}>Admin</button>
+        </div>
       </div>
     </div>
   );
