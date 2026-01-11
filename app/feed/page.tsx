@@ -27,7 +27,6 @@ interface Like {
 }
 
 const MAX_LIKES = 3;
-const CURRENT_SESSION = "1"; // 현재 회차 설정
 
 export default function FeedPage() {
   const [currentUser, setCurrentUser] = useState<any>(null);
@@ -36,6 +35,7 @@ export default function FeedPage() {
   const [selectedItem, setSelectedItem] = useState<FeedItem | null>(null);
   const [remainingLikes, setRemainingLikes] = useState(MAX_LIKES);
   const [isLoading, setIsLoading] = useState(true);
+  const [currentSession, setCurrentSession] = useState("01");
 
   const API_KEY = process.env.NEXT_PUBLIC_GOOGLE_DRIVE_API_KEY;
   const FOLDER_ID = process.env.NEXT_PUBLIC_GOOGLE_DRIVE_FOLDER_ID;
@@ -54,12 +54,12 @@ export default function FeedPage() {
   };
 
   // 데이터 통합 페칭 (G-Drive + Supabase)
-  const fetchFeedData = async () => {
+  const fetchFeedData = async (session: string) => {
     try {
       // 1. Supabase 데이터 가져오기
       const [usersRes, likesRes] = await Promise.all([
         supabase.from("users").select("*"),
-        supabase.from("likes").select("*")
+        supabase.from("feed_likes").select("*")
       ]);
 
       // 2. Google Drive API 호출
@@ -69,9 +69,9 @@ export default function FeedPage() {
       const driveData = await driveRes.json();
       const allFiles = driveData.files || [];
 
-      // 3. 회차 필터링 및 매칭 로직
+      // 3. 회차 필터링 및 매칭 로직 (매칭된 사진만 표시)
       const matchedItems: FeedItem[] = allFiles
-        .filter((file: any) => file.name.startsWith(`${CURRENT_SESSION}_`))
+        .filter((file: any) => file.name.startsWith(`${session}_`))
         .map((file: any) => {
           const namePart = file.name.replace(/\.[^/.]+$/, "");
           const [session, realName, suffix, gender, caption] = namePart.split("_");
@@ -80,15 +80,19 @@ export default function FeedPage() {
             (u) => u.real_name === realName && u.phone_suffix === suffix
           );
 
+          // 매칭된 유저가 없으면 null 반환
+          if (!matchedUser) return null;
+
           return {
             id: file.id,
-            target_user_id: matchedUser?.id || file.id,
-            nickname: matchedUser?.nickname || "신비로운 참가자",
-            gender: gender || matchedUser?.gender || "Unknown",
-            photo_url: `https://drive.google.com/uc?export=view&id=${file.id}`,
+            target_user_id: matchedUser.id,
+            nickname: matchedUser.nickname,
+            gender: gender || matchedUser.gender || "Unknown",
+            photo_url: `https://drive.google.com/thumbnail?id=${file.id}&sz=w800`,
             caption: caption || "매력을 탐색 중입니다."
           };
-        });
+        })
+        .filter((item: FeedItem | null): item is FeedItem => item !== null);
 
       setFeedItems(matchedItems);
       if (likesRes.data) {
@@ -114,22 +118,22 @@ export default function FeedPage() {
 
     if (alreadyLiked) {
       const { error } = await supabase
-        .from("likes")
+        .from("feed_likes")
         .delete()
         .eq("user_id", currentUser.id)
         .eq("target_user_id", item.target_user_id);
 
-      if (!error) fetchFeedData();
+      if (!error) fetchFeedData(currentSession);
     } else {
       if (remainingLikes <= 0) {
         alert("좋아요 가능 횟수를 모두 사용했습니다!");
         return;
       }
       const { error } = await supabase
-        .from("likes")
+        .from("feed_likes")
         .insert({ user_id: currentUser.id, target_user_id: item.target_user_id });
 
-      if (!error) fetchFeedData();
+      if (!error) fetchFeedData(currentSession);
     }
   };
 
@@ -139,9 +143,17 @@ export default function FeedPage() {
   }, []);
 
   useEffect(() => {
-    fetchFeedData();
+    const init = async () => {
+      // 회차 설정 가져오기
+      const { data } = await supabase.from("system_settings").select("value").eq("key", "current_session").single();
+      const session = data?.value || "01";
+      setCurrentSession(session);
+      fetchFeedData(session);
+    };
+    init();
+
     const channel = supabase.channel("feed_sync")
-      .on("postgres_changes", { event: "*", schema: "public", table: "likes" }, fetchFeedData)
+      .on("postgres_changes", { event: "*", schema: "public", table: "feed_likes" }, () => fetchFeedData(currentSession))
       .subscribe();
     return () => { supabase.removeChannel(channel); };
   }, [currentUser]);
