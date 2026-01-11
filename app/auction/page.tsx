@@ -62,7 +62,7 @@ export default function AuctionPage() {
   // [로직 수정] 입찰 성공 시 즉시 내 잔액 차감 반영
   const handleBid = async () => {
     if (!activeItem?.id || !user?.id || loading) return;
-    
+
     const nextBid = activeItem.current_bid + 100;
 
     if (user.balance < nextBid) {
@@ -72,17 +72,37 @@ export default function AuctionPage() {
 
     setLoading(true);
     try {
+      // 0. 경매 상태 재확인 (race condition 방지)
+      const { data: currentItem } = await supabase
+        .from("auction_items")
+        .select("status, current_bid")
+        .eq("id", activeItem.id)
+        .single();
+
+      if (!currentItem || currentItem.status !== 'active') {
+        alert("이 경매는 이미 종료되었습니다.");
+        fetchAllData(user.id);
+        return;
+      }
+
+      // 입찰가가 변경되었는지 확인
+      if (currentItem.current_bid !== activeItem.current_bid) {
+        alert("다른 참가자가 먼저 입찰했습니다. 다시 시도해주세요.");
+        fetchAllData(user.id);
+        return;
+      }
+
       // 1. 최고가 및 낙찰자 업데이트
-      await supabase.from("auction_items").update({ 
-        current_bid: nextBid, 
-        highest_bidder_id: user.id 
+      await supabase.from("auction_items").update({
+        current_bid: nextBid,
+        highest_bidder_id: user.id
       }).eq("id", activeItem.id);
 
       // 2. 입찰 로그 기록
-      await supabase.from("bids").insert({ 
-        auction_item_id: activeItem.id, 
-        user_id: user.id, 
-        amount: nextBid 
+      await supabase.from("bids").insert({
+        auction_item_id: activeItem.id,
+        user_id: user.id,
+        amount: nextBid
       });
 
       // 3. 내 잔액 즉시 차감 로직 추가

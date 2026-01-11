@@ -4,6 +4,22 @@ import { useState, useEffect } from "react";
 import { supabase } from "@/lib/supabase";
 import { VALUES } from "@/app/constants";
 
+interface AuctionItem {
+  id: string;
+  title: string;
+  status: 'pending' | 'active' | 'finished';
+  current_bid: number;
+  highest_bidder_id?: string;
+}
+
+interface User {
+  id: string;
+  nickname: string;
+  balance: number;
+  awardedItems?: AuctionItem[];
+  count?: number;
+}
+
 export default function AdminPage() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [passwordInput, setPasswordInput] = useState("");
@@ -53,8 +69,52 @@ export default function AdminPage() {
     else alert("Passcode Incorrect");
   };
 
-  const updateStatus = async (id: string, status: string) => {
-    await supabase.from("auction_items").update({ status }).eq("id", id);
+const updateStatus = async (id: string, status: string) => {
+  const { error } = await supabase
+    .from("auction_items")
+    .update({ status })
+    .eq("id", id);
+  
+  if (error) {
+    console.error("Update failed:", error);
+    alert("상태 변경에 실패했습니다.");
+  } else {
+    fetchData();
+  }
+};
+
+  // 현재 활성 경매 종료 (Close Auction)
+  const handleCloseAuction = async () => {
+    const active = items.find(i => i.status === 'active');
+    if (!active) {
+      alert("현재 진행 중인 경매가 없습니다.");
+      return;
+    }
+
+    const winner = users.find(u => u.id === active.highest_bidder_id);
+    const winnerName = winner?.nickname || "없음";
+
+    if (!confirm(`"${active.title}" 경매를 종료하시겠습니까?\n\n최종 낙찰자: ${winnerName}\n최종 금액: ${active.current_bid}만원`)) {
+      return;
+    }
+
+    await supabase.from("auction_items").update({ status: 'finished' }).eq("id", active.id);
+    fetchData();
+  };
+
+  // 모든 경매 일괄 종료
+  const handleCloseAllAuctions = async () => {
+    const activeItems = items.filter(i => i.status === 'active' || i.status === 'pending');
+    if (activeItems.length === 0) {
+      alert("종료할 경매가 없습니다.");
+      return;
+    }
+
+    if (!confirm(`진행 중/대기 중인 ${activeItems.length}개의 경매를 모두 종료하시겠습니까?`)) {
+      return;
+    }
+
+    await supabase.from("auction_items").update({ status: 'finished' }).in("id", activeItems.map(i => i.id));
     fetchData();
   };
 
@@ -91,10 +151,17 @@ export default function AdminPage() {
           <div className="mb-10 p-6 bg-[#A52A2A]/5 border border-[#A52A2A]/20 rounded-[2.5rem] text-center animate-in fade-in zoom-in duration-700">
             <p className="text-[#A52A2A] text-[10px] font-sans font-black tracking-[0.4em] uppercase mb-3 leading-none opacity-60">현재 경매 중</p>
             <h2 className="text-[#FFD700] text-5xl italic font-medium tracking-tighter mb-4 leading-none">{activeItem.title}</h2>
-            <div className="flex items-center justify-center gap-2">
+            <div className="flex items-center justify-center gap-2 mb-6">
               <span className="text-white/40 text-[10px] font-sans tracking-widest uppercase">현재가</span>
               <span className="text-white text-xl font-sans font-bold tracking-tight">{activeItem.current_bid.toLocaleString()}만원</span>
             </div>
+            {/* Close Auction Button */}
+            <button
+              onClick={handleCloseAuction}
+              className="px-8 py-4 bg-[#A52A2A] text-white rounded-2xl text-[11px] font-sans font-black tracking-[0.2em] uppercase shadow-lg hover:bg-[#8B2323] active:scale-95 transition-all border-2 border-[#A52A2A]/50"
+            >
+              Close Auction
+            </button>
           </div>
         )}
 
@@ -177,22 +244,51 @@ export default function AdminPage() {
           /* 컨트롤러 */
           <div className="space-y-6">
              <h3 className="text-[10px] font-sans font-black tracking-[0.5em] text-[#A52A2A] uppercase mb-10 text-center italic">Auction Inventory</h3>
-             {items.map((item) => (
-              <div key={item.id} className={`p-8 bg-white rounded-[3rem] border border-[#EEEBDE] flex justify-between items-center ${item.status === 'active' ? 'ring-2 ring-[#A52A2A]/20 shadow-xl' : 'opacity-60'}`}>
-                <div className="min-w-0 flex-1 pr-4 text-left">
-                  <h3 className="text-xl font-medium italic tracking-tighter break-words leading-none mb-2">{item.title}</h3>
-                  <div className="flex items-center gap-2">
-                    <span className={`px-2 py-0.5 rounded text-[8px] font-sans font-black uppercase tracking-widest ${item.status === 'active' ? 'bg-[#A52A2A] text-white animate-pulse' : 'bg-gray-100 text-gray-400'}`}>{item.status}</span>
-                    <span className="text-[10px] font-sans font-bold text-gray-300 uppercase italic">{item.current_bid}만원</span>
+             {items.map((item) => {
+              const winner = users.find(u => u.id === item.highest_bidder_id);
+              return (
+              <div key={item.id} className={`p-8 bg-white rounded-[3rem] border border-[#EEEBDE] ${item.status === 'active' ? 'ring-2 ring-[#A52A2A]/20 shadow-xl' : item.status === 'finished' ? 'opacity-40' : 'opacity-70'}`}>
+                <div className="flex justify-between items-center">
+                  <div className="min-w-0 flex-1 pr-4 text-left">
+                    <h3 className="text-xl font-medium italic tracking-tighter break-words leading-none mb-2">{item.title}</h3>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className={`px-2 py-0.5 rounded text-[8px] font-sans font-black uppercase tracking-widest ${
+                        item.status === 'active' ? 'bg-[#A52A2A] text-white animate-pulse' :
+                        item.status === 'finished' ? 'bg-[#1A1A1A] text-white' : 'bg-gray-100 text-gray-400'
+                      }`}>{item.status}</span>
+                      <span className="text-[10px] font-sans font-bold text-gray-300 uppercase italic">{item.current_bid}만원</span>
+                      {item.status === 'finished' && winner && (
+                        <span className="text-[10px] font-sans font-bold text-[#A52A2A] italic">→ {winner.nickname}</span>
+                      )}
+                    </div>
+                  </div>
+                  <div className="flex gap-2 shrink-0">
+                    {item.status === 'pending' && (
+                      <button onClick={() => updateStatus(item.id, 'active')} className="px-5 py-3 rounded-xl bg-[#1A1A1A] text-white text-[9px] font-sans font-black uppercase shadow-md active:scale-95 transition-all hover:bg-[#333]">Start</button>
+                    )}
+                    {item.status === 'active' && (
+                      <button onClick={() => updateStatus(item.id, 'finished')} className="px-5 py-3 rounded-xl bg-[#A52A2A] text-white text-[9px] font-sans font-black uppercase shadow-md active:scale-95 transition-all hover:bg-[#8B2323]">Close</button>
+                    )}
+                    {item.status === 'finished' && (
+                      <span className="px-5 py-3 text-[9px] font-sans font-black uppercase text-gray-300 italic">Closed</span>
+                    )}
                   </div>
                 </div>
-                <div className="flex gap-2">
-                  <button onClick={() => updateStatus(item.id, 'active')} className="px-5 py-3 rounded-xl bg-[#1A1A1A] text-white text-[9px] font-sans font-black uppercase shadow-md active:scale-95 transition-all">Start</button>
-                  <button onClick={() => updateStatus(id, 'finished')} className="px-5 py-3 rounded-xl border border-[#EEEBDE] text-[9px] font-sans font-black uppercase active:scale-95 transition-all">End</button>
-                </div>
               </div>
-            ))}
-            <div className="mt-24 pt-12 border-t border-dashed border-[#EEEBDE] text-center">
+              );
+            })}
+
+            {/* Close All Auctions */}
+            <div className="mt-12 pt-8 border-t border-[#EEEBDE]">
+              <button
+                onClick={handleCloseAllAuctions}
+                className="w-full py-5 rounded-2xl bg-[#1A1A1A] text-white text-[10px] font-sans font-black tracking-[0.2em] uppercase shadow-lg active:scale-[0.98] transition-all hover:bg-[#A52A2A]"
+              >
+                Close All Auctions
+              </button>
+            </div>
+
+            <div className="mt-16 pt-12 border-t border-dashed border-[#EEEBDE] text-center">
               <button onClick={handleAuctionReset} className="text-[9px] font-sans font-black tracking-[0.4em] text-[#A52A2A]/20 hover:text-[#A52A2A]/60 uppercase transition-all underline underline-offset-8">
                 Initialize Hall of Identity
               </button>
