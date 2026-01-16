@@ -1,256 +1,233 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useMemo, useEffect, useRef } from "react";
 import { supabase } from "@/lib/supabase";
 import { usePhaseRedirect } from "@/lib/hooks/usePhaseRedirect";
 import { Heart, X } from "lucide-react";
+import { parseDriveFileName } from "@/lib/utils/feed-parser";
 
 interface FeedItem {
   id: string;
   nickname: string;
+  user_id: string;
   gender: string;
   photo_url: string;
-  caption: string;
+  caption: string | null;
   target_user_id: string;
+  photo_id: string;
 }
 
 interface Like {
-  id: string;
   user_id: string;
   target_user_id: string;
+  photo_id: string;
 }
-
-const MAX_LIKES = 3;
 
 export default function FeedPage() {
   const [currentUser, setCurrentUser] = useState<any>(null);
   const [feedItems, setFeedItems] = useState<FeedItem[]>([]);
   const [likes, setLikes] = useState<Like[]>([]);
   const [selectedItem, setSelectedItem] = useState<FeedItem | null>(null);
-  const [remainingLikes, setRemainingLikes] = useState(MAX_LIKES);
   const [isLoading, setIsLoading] = useState(true);
-  const [currentSession, setCurrentSession] = useState("01");
+  const [currentSession, setCurrentSession] = useState("");
+  const [genderFilter, setGenderFilter] = useState<"all" | "male" | "female">("all");
+  const [shuffledRawItems, setShuffledRawItems] = useState<FeedItem[]>([]);
+
+  const [optimisticStatus, setOptimisticStatus] = useState<Record<string, boolean>>({});
+  const isSyncing = useRef<Record<string, boolean>>({});
 
   const API_KEY = process.env.NEXT_PUBLIC_GOOGLE_DRIVE_API_KEY;
   const FOLDER_ID = process.env.NEXT_PUBLIC_GOOGLE_DRIVE_FOLDER_ID;
 
-  // Get like count for a user
-  const getLikeCount = (targetUserId: string) => {
-    return likes.filter(like => like.target_user_id === targetUserId).length;
-  };
-
-  // Check if current user liked this target
-  const hasLiked = (targetUserId: string) => {
-    if (!currentUser) return false;
-    return likes.some(like =>
-      like.user_id === currentUser.id && like.target_user_id === targetUserId
-    );
-  };
-
-  // Fetch feed data
-  const fetchFeedData = useCallback(async (session?: string) => {
-    const sessionToUse = session || currentSession;
-
-    try {
-      const stored = localStorage.getItem("auction_user");
-      let myId = "";
-      if (stored) {
+  // 1. 로컬 유저 로드
+  useEffect(() => {
+    const stored = localStorage.getItem("auction_user");
+    if (stored) {
+      try {
         const parsed = JSON.parse(stored);
-        setCurrentUser(parsed);
-        myId = parsed.id;
-      }
+        if (parsed?.id) setCurrentUser(parsed);
+      } catch (e) { console.error(e); }
+    }
+  }, []);
 
+  // 2. 데이터 패칭 (유틸리티 적용 및 구문 완성)
+  const fetchFeedData = useCallback(async (session: string) => {
+    if (!session || !FOLDER_ID || !API_KEY) return;
+    
+    try {
+      setIsLoading(true);
       const [usersRes, likesRes] = await Promise.all([
         supabase.from("users").select("*"),
-        supabase.from("feed_likes").select("*")
+        supabase.from("feed_likes").select("user_id, target_user_id, photo_id") 
       ]);
 
-      // Fetch Google Drive photos
       const driveRes = await fetch(
         `https://www.googleapis.com/drive/v3/files?q='${FOLDER_ID}'+in+parents+and+mimeType+contains+'image/'&fields=files(id,name)&key=${API_KEY}`
       );
       const driveData = await driveRes.json();
-      const allFiles = driveData.files || [];
 
-      // Match files to users
-      const matchedItems: FeedItem[] = allFiles
-        .filter((file: any) => file.name.startsWith(`${sessionToUse}_`))
+      const matchedItems = (driveData.files || [])
         .map((file: any) => {
-          const namePart = file.name.replace(/\.[^/.]+$/, "");
-          const [, realName, suffix, gender, caption] = namePart.split("_");
-          const matchedUser = usersRes.data?.find(u => u.real_name === realName && u.phone_suffix === suffix);
+          const info = parseDriveFileName(file.name);
+          // 현재 활성화된 세션 사진만 필터링
+          if (!info || info.session !== session) return null;
+
+          const matchedUser = usersRes.data?.find(u => 
+            String(u.real_name).trim() === info.realName && 
+            String(u.phone_suffix).trim() === info.phoneSuffix
+          );
 
           if (!matchedUser) return null;
+
           return {
             id: file.id,
-            target_user_id: matchedUser.id,
+            photo_id: file.id,
+            user_id: currentUser?.id || "",
+            target_user_id: String(matchedUser.id),
             nickname: matchedUser.nickname,
-            gender: gender || matchedUser.gender || "Unknown",
+            gender: info.gender,
             photo_url: `https://drive.google.com/thumbnail?id=${file.id}&sz=w800`,
-            caption: caption || "매력을 탐색 중입니다."
-          };
-        })
-        .filter((item: any): item is FeedItem => item !== null);
+            caption: info.caption
+          } as FeedItem;
+        }).filter((item: any): item is FeedItem => item !== null);
 
       setFeedItems(matchedItems);
-
-      // Update likes state
-      if (likesRes.data) {
-        setLikes(likesRes.data);
-        if (myId) {
-          const myLikesCount = likesRes.data.filter(l => l.user_id === myId).length;
-          setRemainingLikes(MAX_LIKES - myLikesCount);
-        }
+      setLikes(likesRes.data || []);
+      
+      // 첫 로드 시에만 셔플 적용
+      if (shuffledRawItems.length === 0) {
+        setShuffledRawItems([...matchedItems].sort(() => Math.random() - 0.5));
       }
     } catch (error) {
-      console.error("Feed Error:", error);
+      console.error("Feed Load Error:", error);
     } finally {
       setIsLoading(false);
     }
-  }, [currentSession, API_KEY, FOLDER_ID]);
+  }, [currentUser?.id, API_KEY, FOLDER_ID, shuffledRawItems.length]);
 
-  // Use unified phase redirect hook
+  // 3. 페이즈 리다이렉트 연동
   usePhaseRedirect({
     currentPage: "feed",
     onSettingsFetched: (settings) => {
-      // Get session from settings and load feed data
-      const session = String(settings.current_session) || "01";
-      setCurrentSession(session);
-      fetchFeedData(session);
-    },
-    onFeedLikesChange: () => {
-      // Likes changed - refresh feed data
-      fetchFeedData();
+      const session = String(settings.current_session).padStart(2, '0');
+      if (currentSession !== session) {
+        setCurrentSession(session);
+        fetchFeedData(session);
+      }
     }
   });
 
-  // Handle like action
-  const handleLike = async (item: FeedItem, e?: React.MouseEvent) => {
-    e?.stopPropagation();
-    if (!currentUser || currentUser.id === item.target_user_id) return;
+  // 4. 필터 및 셔플 결과 계산
+  const displayItems = useMemo(() => {
+    let items = shuffledRawItems.length > 0 ? shuffledRawItems : feedItems;
+    if (genderFilter === "male") items = items.filter(i => ["남성", "남", "m", "male"].includes(i.gender.toLowerCase()));
+    if (genderFilter === "female") items = items.filter(i => ["여성", "여", "f", "female"].includes(i.gender.toLowerCase()));
+    return items;
+  }, [shuffledRawItems, feedItems, genderFilter]);
 
-    const alreadyLiked = hasLiked(item.target_user_id);
-
-    if (alreadyLiked) {
-      // Remove like
-      await supabase
-        .from("feed_likes")
-        .delete()
-        .eq("user_id", currentUser.id)
-        .eq("target_user_id", item.target_user_id);
-    } else {
-      // Add like
-      if (remainingLikes <= 0) {
-        alert("좋아요 가능 횟수(3회)를 모두 사용했습니다!");
-        return;
-      }
-      await supabase
-        .from("feed_likes")
-        .insert({ user_id: currentUser.id, target_user_id: item.target_user_id });
-    }
-
-    // Refresh data
-    fetchFeedData();
+  // 5. 좋아요 상태 판별
+  const checkIfLiked = (photoId: string) => {
+    if (!currentUser?.id) return false;
+    if (optimisticStatus[photoId] !== undefined) return optimisticStatus[photoId];
+    return likes.some(l => String(l.user_id) === String(currentUser.id) && String(l.photo_id) === String(photoId));
   };
 
-  if (isLoading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center font-serif italic text-gray-400 bg-[#FDFDFD]">
-        Loading Gallery...
-      </div>
-    );
-  }
+  const getLikeCount = (photoId: string) => {
+    const othersCount = likes.filter(l => String(l.photo_id) === String(photoId) && String(l.user_id) !== String(currentUser?.id)).length;
+    return checkIfLiked(photoId) ? othersCount + 1 : othersCount;
+  };
+
+  // 6. 좋아요 처리
+  const handleLike = async (item: FeedItem) => {
+    if (String(currentUser?.id) === String(item.target_user_id)) {
+      alert("본인 사진에는 하트를 남길 수 없습니다. :)");
+      return;
+    }
+    if (isSyncing.current[item.id]) return;
+
+    const currentlyLiked = checkIfLiked(item.id);
+    const nextStatus = !currentlyLiked;
+
+    isSyncing.current[item.id] = true;
+    setOptimisticStatus(prev => ({ ...prev, [item.id]: nextStatus }));
+
+    try {
+      if (currentlyLiked) {
+        await supabase.from("feed_likes").delete().match({ user_id: currentUser.id, photo_id: item.id });
+      } else {
+        await supabase.from("feed_likes").insert({ user_id: currentUser.id, target_user_id: item.target_user_id, photo_id: item.id });
+      }
+      
+      if (nextStatus) {
+        setLikes(prev => [...prev, { user_id: currentUser.id, target_user_id: item.target_user_id, photo_id: item.id }]);
+      } else {
+        setLikes(prev => prev.filter(l => !(String(l.user_id) === String(currentUser.id) && String(l.photo_id) === String(item.id))));
+      }
+    } catch (e) {
+      console.error(e);
+      fetchFeedData(currentSession);
+    } finally {
+      setTimeout(() => {
+        setOptimisticStatus(prev => {
+          const next = { ...prev };
+          delete next[item.id];
+          return next;
+        });
+        isSyncing.current[item.id] = false;
+      }, 1000);
+    }
+  };
+
+  if (isLoading) return <div className="min-h-screen flex items-center justify-center bg-[#FDFDFD] font-serif italic text-gray-400">Loading Gallery...</div>;
 
   return (
-    <div className="min-h-screen bg-[#FDFDFD] text-[#1A1A1A] font-serif antialiased pb-24">
-      {/* Header */}
-      <header className="sticky top-0 z-40 bg-white/80 backdrop-blur-xl border-b border-[#EEEBDE] px-5 py-6">
-        <div className="max-w-xl mx-auto flex items-center justify-between">
-          <div>
-            <h1 className="text-2xl italic tracking-tight font-bold">The Gallery</h1>
-            <p className="text-[9px] font-sans font-black text-[#A52A2A] uppercase tracking-[0.2em]">Soul Discovery</p>
+    <div className="min-h-screen bg-[#FDFDFD] text-[#1A1A1A] font-serif pb-24 select-none">
+      <header className="sticky top-0 z-40 bg-white/80 backdrop-blur-xl border-b border-[#EEEBDE] px-5 py-4">
+        <div className="max-w-xl mx-auto flex flex-col gap-4">
+          <div className="flex justify-between items-center">
+            <h1 className="text-2xl italic font-bold">The Gallery</h1>
+            <div className="bg-[#FDF8F8] px-3 py-1 rounded-full text-[10px] text-[#A52A2A] font-black uppercase tracking-widest border border-[#A52A2A]/5">{displayItems.length} Photos</div>
           </div>
-          <div className="flex items-center gap-2 bg-[#FDF8F8] px-4 py-2 rounded-full border border-[#A52A2A]/10">
-            <Heart size={12} fill="#A52A2A" className="text-[#A52A2A]" />
-            <span className="text-[10px] font-sans font-black text-[#A52A2A] uppercase tracking-widest">남은 좋아요: {remainingLikes}</span>
+          <div className="flex gap-2 justify-center">
+            {["all", "male", "female"].map((f: any) => (
+              <button key={f} onClick={() => setGenderFilter(f)} className={`px-6 py-1.5 rounded-full text-[10px] font-black uppercase tracking-widest transition-all ${genderFilter === f ? "bg-[#1A1A1A] text-white" : "bg-gray-100 text-gray-400"}`}>{f}</button>
+            ))}
           </div>
         </div>
       </header>
 
-      {/* Grid View */}
-      <main className="max-w-xl mx-auto px-1 pt-1">
-        <div className="grid grid-cols-3 gap-[2px]">
-          {feedItems.map((item) => (
-            <div
-              key={item.id}
-              className="aspect-square relative cursor-pointer group overflow-hidden"
-              onClick={() => setSelectedItem(item)}
-            >
-              <img src={item.photo_url} className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-110" alt="feed" />
-              <div className="absolute inset-0 bg-black/20 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-                <div className="flex items-center gap-1 text-white text-sm font-bold">
-                  <Heart size={16} fill="white" />
-                  {getLikeCount(item.target_user_id)}
-                </div>
-              </div>
-              {hasLiked(item.target_user_id) && (
-                <div className="absolute top-2 right-2 w-6 h-6 bg-[#A52A2A] rounded-full flex items-center justify-center shadow-lg border border-white/20">
-                  <Heart size={12} fill="white" className="text-white" />
-                </div>
-              )}
+      <main className="max-w-xl mx-auto grid grid-cols-3 gap-[2px] pt-[2px]">
+        {displayItems.map((item) => (
+          <div key={item.id} onClick={() => setSelectedItem(item)} className="aspect-square relative group cursor-pointer overflow-hidden bg-gray-100">
+            <img src={item.photo_url} className="w-full h-full object-cover transition-transform group-hover:scale-110" alt="" />
+            <div className="absolute inset-0 bg-black/20 flex items-center justify-center text-white text-xs font-bold transition-opacity">
+              <Heart size={14} fill={checkIfLiked(item.id) ? "#FF3B30" : "none"} className={checkIfLiked(item.id) ? "text-[#FF3B30]" : "text-white"} />
+              <span className="ml-1">{getLikeCount(item.id)}</span>
             </div>
-          ))}
-        </div>
+          </div>
+        ))}
       </main>
 
-      {/* Detail Modal */}
       {selectedItem && (
-        <div className="fixed inset-0 z-50 bg-black/95 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setSelectedItem(null)}>
-          <div className="bg-white rounded-[2.5rem] max-w-md w-full overflow-hidden shadow-2xl animate-in zoom-in duration-300" onClick={(e) => e.stopPropagation()}>
+        <div className="fixed inset-0 z-[100] bg-black/90 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setSelectedItem(null)}>
+          <div className="bg-white rounded-[2.5rem] max-w-md w-full overflow-hidden shadow-2xl relative" onClick={e => e.stopPropagation()}>
             <div className="relative">
-              <img src={selectedItem.photo_url} className="w-full aspect-square object-cover" />
-              <button
-                onClick={() => setSelectedItem(null)}
-                className="absolute top-6 right-6 w-10 h-10 bg-black/20 backdrop-blur-md rounded-full flex items-center justify-center text-white"
-              >
-                <X size={20} />
-              </button>
+              <img src={selectedItem.photo_url} className="w-full aspect-square object-cover shadow-inner" alt="" />
+              <button onClick={() => setSelectedItem(null)} className="absolute top-4 right-4 w-10 h-10 bg-black/30 backdrop-blur-md rounded-full flex items-center justify-center text-white z-[110]"><X size={20} /></button>
             </div>
-
             <div className="p-8 space-y-6">
-              <div className="flex justify-between items-start">
-                <div>
-                  <h2 className="text-2xl font-bold italic mb-1">{selectedItem.nickname}</h2>
-                  <span className="text-[10px] font-sans font-black text-gray-400 uppercase tracking-[0.2em]">{selectedItem.gender}</span>
+              <div className="flex justify-between items-center">
+                <div onClick={() => handleLike(selectedItem)} className="flex items-center gap-3 cursor-pointer transition-transform active:scale-125 select-none">
+                  <Heart size={38} fill={checkIfLiked(selectedItem.id) ? "#FF3B30" : "none"} className={checkIfLiked(selectedItem.id) ? "text-[#FF3B30]" : "text-gray-300"} />
+                  <span className="font-sans font-black text-3xl">{getLikeCount(selectedItem.id)}</span>
                 </div>
-                <div className="flex items-center gap-1.5 text-[#A52A2A] bg-[#FDF8F8] px-3 py-1 rounded-full border border-[#A52A2A]/5">
-                  <Heart size={14} fill="#A52A2A" />
-                  <span className="text-sm font-sans font-bold">{getLikeCount(selectedItem.target_user_id)}</span>
-                </div>
+                <span className="text-[10px] font-sans font-black text-gray-300 uppercase tracking-widest">{selectedItem.gender}</span>
               </div>
-
-              <div className="py-6 border-y border-gray-50">
-                <p className="text-[13px] text-gray-600 leading-relaxed italic text-center break-keep">
+              {selectedItem.caption && (
+                <div className="py-6 border-y border-gray-50 text-center italic text-gray-600 text-[13px] break-keep">
                   "{selectedItem.caption}"
-                </p>
-              </div>
-
-              {currentUser && currentUser.id !== selectedItem.target_user_id && (
-                <button
-                  onClick={(e) => handleLike(selectedItem, e)}
-                  className={`w-full py-5 rounded-[1.5rem] text-xs font-sans font-black tracking-[0.2em] uppercase transition-all duration-300 shadow-lg active:scale-95 ${
-                    hasLiked(selectedItem.target_user_id)
-                    ? "bg-[#A52A2A] text-white shadow-[#A52A2A]/20"
-                    : "bg-[#1A1A1A] text-white"
-                  }`}
-                >
-                  {hasLiked(selectedItem.target_user_id) ? "♥ Liked" : "Send Like"}
-                </button>
+                </div>
               )}
-
-              <p className="text-[9px] text-gray-300 text-center font-sans font-medium uppercase tracking-widest">
-                Click background to close
-              </p>
             </div>
           </div>
         </div>
