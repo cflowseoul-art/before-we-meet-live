@@ -1,8 +1,8 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useCallback } from "react";
 import { supabase } from "@/lib/supabase";
-import { useRouter } from "next/navigation";
+import { usePhaseRedirect } from "@/lib/hooks/usePhaseRedirect";
 import { Heart, X } from "lucide-react";
 
 interface FeedItem {
@@ -23,7 +23,6 @@ interface Like {
 const MAX_LIKES = 3;
 
 export default function FeedPage() {
-  const router = useRouter();
   const [currentUser, setCurrentUser] = useState<any>(null);
   const [feedItems, setFeedItems] = useState<FeedItem[]>([]);
   const [likes, setLikes] = useState<Like[]>([]);
@@ -35,12 +34,12 @@ export default function FeedPage() {
   const API_KEY = process.env.NEXT_PUBLIC_GOOGLE_DRIVE_API_KEY;
   const FOLDER_ID = process.env.NEXT_PUBLIC_GOOGLE_DRIVE_FOLDER_ID;
 
-  // 특정 유저가 받은 총 좋아요 수 계산
+  // Get like count for a user
   const getLikeCount = (targetUserId: string) => {
     return likes.filter(like => like.target_user_id === targetUserId).length;
   };
 
-  // 내가 이 유저를 좋아하는지 확인
+  // Check if current user liked this target
   const hasLiked = (targetUserId: string) => {
     if (!currentUser) return false;
     return likes.some(like =>
@@ -48,29 +47,39 @@ export default function FeedPage() {
     );
   };
 
-  const fetchFeedData = async (session: string, userId?: string) => {
+  // Fetch feed data
+  const fetchFeedData = useCallback(async (session?: string) => {
+    const sessionToUse = session || currentSession;
+
     try {
-      // 1. 유저 정보와 좋아요 정보 가져오기
+      const stored = localStorage.getItem("auction_user");
+      let myId = "";
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        setCurrentUser(parsed);
+        myId = parsed.id;
+      }
+
       const [usersRes, likesRes] = await Promise.all([
         supabase.from("users").select("*"),
         supabase.from("feed_likes").select("*")
       ]);
 
-      // 2. 구글 드라이브 사진 가져오기
+      // Fetch Google Drive photos
       const driveRes = await fetch(
         `https://www.googleapis.com/drive/v3/files?q='${FOLDER_ID}'+in+parents+and+mimeType+contains+'image/'&fields=files(id,name)&key=${API_KEY}`
       );
       const driveData = await driveRes.json();
       const allFiles = driveData.files || [];
 
-      // 3. 파일명 파싱 및 유저 매칭
+      // Match files to users
       const matchedItems: FeedItem[] = allFiles
-        .filter((file: any) => file.name.startsWith(`${session}_`))
+        .filter((file: any) => file.name.startsWith(`${sessionToUse}_`))
         .map((file: any) => {
           const namePart = file.name.replace(/\.[^/.]+$/, "");
-          const [sess, realName, suffix, gender, caption] = namePart.split("_");
+          const [, realName, suffix, gender, caption] = namePart.split("_");
           const matchedUser = usersRes.data?.find(u => u.real_name === realName && u.phone_suffix === suffix);
-          
+
           if (!matchedUser) return null;
           return {
             id: file.id,
@@ -84,11 +93,10 @@ export default function FeedPage() {
         .filter((item: any): item is FeedItem => item !== null);
 
       setFeedItems(matchedItems);
-      
-      // 4. 좋아요 상태 업데이트
+
+      // Update likes state
       if (likesRes.data) {
         setLikes(likesRes.data);
-        const myId = userId || currentUser?.id;
         if (myId) {
           const myLikesCount = likesRes.data.filter(l => l.user_id === myId).length;
           setRemainingLikes(MAX_LIKES - myLikesCount);
@@ -99,50 +107,24 @@ export default function FeedPage() {
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [currentSession, API_KEY, FOLDER_ID]);
 
-  useEffect(() => {
-    const init = async () => {
-      const stored = localStorage.getItem("auction_user");
-      let myId = "";
-      if (stored) {
-        const parsed = JSON.parse(stored);
-        setCurrentUser(parsed);
-        myId = parsed.id;
-      }
-
-      const { data: settings } = await supabase.from("system_settings").select("*");
-      const session = settings?.find(s => s.key === "current_session")?.value || "01";
-      const isReportOpen = settings?.find(s => s.key === "is_report_open")?.value === "true";
-      
-      if (isReportOpen && myId) {
-        window.location.href = `/1on1/loading/${myId}`;
-        return;
-      }
-
+  // Use unified phase redirect hook
+  usePhaseRedirect({
+    currentPage: "feed",
+    onSettingsFetched: (settings) => {
+      // Get session from settings and load feed data
+      const session = String(settings.current_session) || "01";
       setCurrentSession(session);
-      fetchFeedData(session, myId);
-    };
-    init();
+      fetchFeedData(session);
+    },
+    onFeedLikesChange: () => {
+      // Likes changed - refresh feed data
+      fetchFeedData();
+    }
+  });
 
-    // [실시간 동기화]
-    const channel = supabase.channel("feed_sync")
-      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "system_settings" }, (payload: any) => {
-        if (payload.new.key === "is_report_open" && payload.new.value === "true") {
-          const stored = localStorage.getItem("auction_user");
-          if (stored) window.location.href = `/1on1/loading/${JSON.parse(stored).id}`;
-        }
-      })
-      // 좋아요가 눌리면 즉시 모든 유저의 화면을 업데이트
-      .on("postgres_changes", { event: "*", schema: "public", table: "feed_likes" }, () => {
-        fetchFeedData(currentSession);
-      })
-      .subscribe();
-
-    return () => { supabase.removeChannel(channel); };
-  }, [currentSession]);
-
-  // 좋아요 누르기 로직
+  // Handle like action
   const handleLike = async (item: FeedItem, e?: React.MouseEvent) => {
     e?.stopPropagation();
     if (!currentUser || currentUser.id === item.target_user_id) return;
@@ -150,14 +132,14 @@ export default function FeedPage() {
     const alreadyLiked = hasLiked(item.target_user_id);
 
     if (alreadyLiked) {
-      // 좋아요 취소
+      // Remove like
       await supabase
         .from("feed_likes")
         .delete()
         .eq("user_id", currentUser.id)
         .eq("target_user_id", item.target_user_id);
     } else {
-      // 좋아요 추가
+      // Add like
       if (remainingLikes <= 0) {
         alert("좋아요 가능 횟수(3회)를 모두 사용했습니다!");
         return;
@@ -166,15 +148,22 @@ export default function FeedPage() {
         .from("feed_likes")
         .insert({ user_id: currentUser.id, target_user_id: item.target_user_id });
     }
-    // 데이터 즉시 갱신
-    fetchFeedData(currentSession);
+
+    // Refresh data
+    fetchFeedData();
   };
 
-  if (isLoading) return <div className="min-h-screen flex items-center justify-center font-serif italic text-gray-400 bg-[#FDFDFD]">Loading Gallery...</div>;
+  if (isLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center font-serif italic text-gray-400 bg-[#FDFDFD]">
+        Loading Gallery...
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-[#FDFDFD] text-[#1A1A1A] font-serif antialiased pb-24">
-      {/* 헤더 */}
+      {/* Header */}
       <header className="sticky top-0 z-40 bg-white/80 backdrop-blur-xl border-b border-[#EEEBDE] px-5 py-6">
         <div className="max-w-xl mx-auto flex items-center justify-between">
           <div>
@@ -188,13 +177,13 @@ export default function FeedPage() {
         </div>
       </header>
 
-      {/* 그리드 뷰 */}
+      {/* Grid View */}
       <main className="max-w-xl mx-auto px-1 pt-1">
         <div className="grid grid-cols-3 gap-[2px]">
           {feedItems.map((item) => (
-            <div 
-              key={item.id} 
-              className="aspect-square relative cursor-pointer group overflow-hidden" 
+            <div
+              key={item.id}
+              className="aspect-square relative cursor-pointer group overflow-hidden"
               onClick={() => setSelectedItem(item)}
             >
               <img src={item.photo_url} className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-110" alt="feed" />
@@ -214,20 +203,20 @@ export default function FeedPage() {
         </div>
       </main>
 
-      {/* 상세 모달 */}
+      {/* Detail Modal */}
       {selectedItem && (
         <div className="fixed inset-0 z-50 bg-black/95 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setSelectedItem(null)}>
           <div className="bg-white rounded-[2.5rem] max-w-md w-full overflow-hidden shadow-2xl animate-in zoom-in duration-300" onClick={(e) => e.stopPropagation()}>
             <div className="relative">
               <img src={selectedItem.photo_url} className="w-full aspect-square object-cover" />
-              <button 
+              <button
                 onClick={() => setSelectedItem(null)}
                 className="absolute top-6 right-6 w-10 h-10 bg-black/20 backdrop-blur-md rounded-full flex items-center justify-center text-white"
               >
                 <X size={20} />
               </button>
             </div>
-            
+
             <div className="p-8 space-y-6">
               <div className="flex justify-between items-start">
                 <div>
@@ -239,7 +228,7 @@ export default function FeedPage() {
                   <span className="text-sm font-sans font-bold">{getLikeCount(selectedItem.target_user_id)}</span>
                 </div>
               </div>
-              
+
               <div className="py-6 border-y border-gray-50">
                 <p className="text-[13px] text-gray-600 leading-relaxed italic text-center break-keep">
                   "{selectedItem.caption}"
@@ -250,15 +239,15 @@ export default function FeedPage() {
                 <button
                   onClick={(e) => handleLike(selectedItem, e)}
                   className={`w-full py-5 rounded-[1.5rem] text-xs font-sans font-black tracking-[0.2em] uppercase transition-all duration-300 shadow-lg active:scale-95 ${
-                    hasLiked(selectedItem.target_user_id) 
-                    ? 'bg-[#A52A2A] text-white shadow-[#A52A2A]/20' 
-                    : 'bg-[#1A1A1A] text-white'
+                    hasLiked(selectedItem.target_user_id)
+                    ? "bg-[#A52A2A] text-white shadow-[#A52A2A]/20"
+                    : "bg-[#1A1A1A] text-white"
                   }`}
                 >
-                  {hasLiked(selectedItem.target_user_id) ? '♥ Liked' : 'Send Like'}
+                  {hasLiked(selectedItem.target_user_id) ? "♥ Liked" : "Send Like"}
                 </button>
               )}
-              
+
               <p className="text-[9px] text-gray-300 text-center font-sans font-medium uppercase tracking-widest">
                 Click background to close
               </p>

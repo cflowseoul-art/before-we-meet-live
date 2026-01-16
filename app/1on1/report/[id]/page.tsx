@@ -1,42 +1,33 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { useRouter } from "next/navigation";
+import { useState, useEffect, useCallback } from "react";
 import { supabase } from "@/lib/supabase";
+import { usePhaseRedirect } from "@/lib/hooks/usePhaseRedirect";
 import { MatchingCard } from "../../_components/MatchingCard";
 
 export default function UserReportPage({ params }: { params: any }) {
-  const router = useRouter();
   const [user, setUser] = useState<any>(null);
   const [matches, setMatches] = useState<any[]>([]);
   const [targetGender, setTargetGender] = useState("");
   const [isLoading, setIsLoading] = useState(true);
+  const [userId, setUserId] = useState<string | null>(null);
 
-  // 데이터 로드 함수
-  const fetchData = async (userId: string) => {
-    // 1. 시스템 설정 확인 (역방향 리다이렉션용)
-    const { data: settings } = await supabase.from("system_settings").select("*");
-    const isReportOpen = settings?.find(s => s.key === "is_report_open")?.value === "true";
-    const isFeedOpen = settings?.find(s => s.key === "is_feed_open")?.value === "true";
-    const currentSession = settings?.find(s => s.key === "current_session")?.value || "01";
-
-    // 만약 어드민이 리포트를 닫았다면, 현재 단계에 맞는 곳으로 강제 소환
-    if (!isReportOpen) {
-      if (isFeedOpen) router.push("/feed");
-      else router.push("/auction");
-      return;
-    }
-
-    // 2. 내 정보 가져오기
-    const { data: userData } = await supabase.from("users").select("*").eq("id", userId).single();
+  // Fetch match data
+  const fetchMatchData = useCallback(async (uid: string, sessionId: string) => {
+    // Get user info
+    const { data: userData } = await supabase
+      .from("users")
+      .select("*")
+      .eq("id", uid)
+      .single();
 
     if (userData) {
       setUser(userData);
       const myGender = userData.gender?.trim() || "";
-      const target = (myGender === '여성' || myGender === '여') ? '남성' : '여성';
+      const target = (myGender === "여성" || myGender === "여") ? "남성" : "여성";
       setTargetGender(target);
 
-      // 3. 미리 계산된 매칭 결과 가져오기 (RPC로 생성된 데이터)
+      // Get pre-calculated matches from RPC
       const { data: matchData } = await supabase
         .from("matches")
         .select(`
@@ -51,12 +42,12 @@ export default function UserReportPage({ params }: { params: any }) {
             gender
           )
         `)
-        .eq("user_id", userId)
-        .eq("session_id", currentSession)
+        .eq("user_id", uid)
+        .eq("session_id", sessionId)
         .order("match_rank", { ascending: true })
         .limit(3);
 
-      // Transform the data to expected format
+      // Transform data
       const formattedMatches = matchData?.map(m => ({
         ...m.matched_user,
         final_score: m.final_score,
@@ -66,33 +57,55 @@ export default function UserReportPage({ params }: { params: any }) {
 
       setMatches(formattedMatches);
     }
+
     setIsLoading(false);
-  };
+  }, []);
 
+  // Use unified phase redirect hook
+  usePhaseRedirect({
+    currentPage: "report",
+    onSettingsFetched: (settings) => {
+      // Settings valid and on report page - load match data
+      if (userId) {
+        const session = String(settings.current_session) || "01";
+        fetchMatchData(userId, session);
+      }
+    }
+  });
+
+  // Resolve params and set userId
   useEffect(() => {
-    // Next.js 15 params 대응
     params.then((p: any) => {
-      fetchData(p.id);
-
-      // [실시간 안테나] 어드민이 리포트 단계를 끄면 즉시 퇴장
-      const channel = supabase.channel("report_status_monitor")
-        .on("postgres_changes", { 
-          event: "UPDATE", 
-          schema: "public", 
-          table: "system_settings"
-        }, (payload: any) => {
-          // 리포트가 닫히면(false가 되면) 무조건 쫓겨남
-          if (payload.new.key === "is_report_open" && payload.new.value === "false") {
-            window.location.reload(); // 가장 확실하게 상태 초기화 후 리다이렉트
-          }
-        })
-        .subscribe();
-
-      return () => { supabase.removeChannel(channel); };
+      setUserId(p.id);
     });
-  }, [router]);
+  }, [params]);
 
-  if (isLoading || !user) return <div className="min-h-screen bg-[#FDFDFD] flex items-center justify-center font-serif italic text-gray-400 animate-pulse">Analyzing your soul...</div>;
+  // Fetch data when userId is set
+  useEffect(() => {
+    if (userId) {
+      // Fetch initial settings and match data
+      const loadData = async () => {
+        const { data: settings } = await supabase
+          .from("system_settings")
+          .select("key, value");
+
+        const sessionSetting = settings?.find(s => s.key === "current_session");
+        const session = String(sessionSetting?.value) || "01";
+
+        fetchMatchData(userId, session);
+      };
+
+      loadData();
+    }
+  }, [userId, fetchMatchData]);
+
+  if (isLoading || !user) {
+    return (
+      <div className="min-h-screen bg-[#FDFDFD] flex items-center justify-center font-serif italic text-gray-400 animate-pulse">
+        Analyzing your soul...
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-[#FDFDFD] text-[#1A1A1A] font-serif p-6 pb-20 antialiased">

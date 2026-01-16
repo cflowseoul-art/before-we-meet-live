@@ -1,106 +1,69 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { useRouter } from "next/navigation";
+import { useState, useEffect, useCallback } from "react";
 import { supabase } from "@/lib/supabase";
+import { usePhaseRedirect } from "@/lib/hooks/usePhaseRedirect";
 
 export default function AuctionPage() {
-  const router = useRouter();
   const [activeItem, setActiveItem] = useState<any>(null);
   const [allItems, setAllItems] = useState<any[]>([]);
   const [user, setUser] = useState<any>(null);
   const [loading, setLoading] = useState(false);
   const [showModal, setShowModal] = useState(false);
 
-  // 데이터 통합 로드 및 초기 단계 체크
-  const fetchAllData = async (userId: string) => {
-    const [itemsRes, settingsRes] = await Promise.all([
-      supabase.from("auction_items").select("*").order("id"),
-      supabase.from("system_settings").select("*")
-    ]);
+  // Fetch auction data
+  const fetchAuctionData = useCallback(async () => {
+    const stored = localStorage.getItem("auction_user");
+    if (!stored) return;
 
-    // [체크 1] 이미 리포트가 열려있다면 최우선 이동
-    const isReportOpen = settingsRes.data?.find(s => s.key === "is_report_open")?.value === "true";
-    if (isReportOpen) {
-      router.push(`/1on1/loading/${userId}`);
-      return;
-    }
+    const userId = JSON.parse(stored).id;
 
-    // [체크 2] 피드(갤러리)가 열려있다면 이동
-    const isFeedOpen = settingsRes.data?.find(s => s.key === "is_feed_open")?.value === "true";
-    if (isFeedOpen) {
-      router.push("/feed");
-      return;
-    }
+    const { data: itemsData } = await supabase
+      .from("auction_items")
+      .select("*")
+      .order("id");
 
-    if (itemsRes.data) {
-      setAllItems(itemsRes.data);
-      const active = itemsRes.data.find(i => i.status === "active");
+    if (itemsData) {
+      setAllItems(itemsData);
+      const active = itemsData.find(i => i.status === "active");
       setActiveItem(active || null);
     }
 
-    const { data: userData } = await supabase.from("users").select("*").eq("id", userId).single();
+    const { data: userData } = await supabase
+      .from("users")
+      .select("*")
+      .eq("id", userId)
+      .single();
+
     if (userData) {
       setUser(userData);
       localStorage.setItem("auction_user", JSON.stringify(userData));
     }
-  };
+  }, []);
 
-  // app/auction/page.tsx 내의 기존 useEffect를 이 코드로 교체하세요
+  // Use unified phase redirect hook
+  usePhaseRedirect({
+    currentPage: "auction",
+    onSettingsFetched: () => {
+      // Settings fetched and no redirect needed - load auction data
+      fetchAuctionData();
+    },
+    onAuctionItemsChange: () => {
+      // Auction items changed - refresh data
+      fetchAuctionData();
+    }
+  });
 
+  // Initial load and modal check
   useEffect(() => {
-    const loadUser = () => {
-      const stored = localStorage.getItem("auction_user");
-      if (stored) {
-        const parsedUser = JSON.parse(stored);
-        fetchAllData(parsedUser.id);
-        if (!sessionStorage.getItem("has_seen_modal")) setShowModal(true);
+    const stored = localStorage.getItem("auction_user");
+    if (stored) {
+      fetchAuctionData();
+      if (!sessionStorage.getItem("has_seen_modal")) {
+        setShowModal(true);
       }
-    };
-    loadUser();
-
-    console.log("🔔 실시간 구독을 시작합니다...");
-
-    const channel = supabase.channel("auction_to_anywhere_sync")
-      .on("postgres_changes", { 
-        event: "*", 
-        schema: "public", 
-        table: "auction_items" 
-      }, (payload) => {
-        console.log("♻️ 경매 아이템 변경 감지:", payload);
-        const stored = localStorage.getItem("auction_user");
-        if (stored) fetchAllData(JSON.parse(stored).id);
-      })
-      .on("postgres_changes", { 
-        event: "UPDATE", 
-        schema: "public", 
-        table: "system_settings" 
-      }, (payload: any) => {
-        console.log("⚙️ 시스템 설정 변경 감지:", payload.new.key, "->", payload.new.value);
-        const { key, value } = payload.new;
-
-        if (key === "is_report_open" && value === "true") {
-          console.log("🏁 리포트 페이지로 이동합니다.");
-          const stored = localStorage.getItem("auction_user");
-          if (stored) {
-            const userId = JSON.parse(stored).id;
-            router.push(`/1on1/loading/${userId}`);
-          }
-        } 
-        else if (key === "is_feed_open" && value === "true") {
-          console.log("📸 피드 페이지로 이동합니다.");
-          router.push("/feed");
-        }
-      })
-      .subscribe((status) => {
-        console.log("📡 구독 상태:", status); 
-      });
-
-    return () => { 
-      console.log("🔌 구독을 해제합니다.");
-      supabase.removeChannel(channel); 
-    };
-  }, [router]);
+    }
+  }, [fetchAuctionData]);
 
   const closeIntroModal = () => {
     setShowModal(false);
@@ -109,31 +72,56 @@ export default function AuctionPage() {
 
   const handleBid = async () => {
     if (!activeItem?.id || !user?.id || loading) return;
+
     const nextBid = activeItem.current_bid + 100;
     if (user.balance < nextBid) {
       alert(`잔액이 부족합니다. 입찰하려면 ${nextBid}만원이 필요합니다.`);
       return;
     }
+
     setLoading(true);
     try {
-      const { data: currentItem } = await supabase.from("auction_items").select("status, current_bid").eq("id", activeItem.id).single();
-      if (!currentItem || currentItem.status !== 'active') {
+      // Check current state before bidding
+      const { data: currentItem } = await supabase
+        .from("auction_items")
+        .select("status, current_bid")
+        .eq("id", activeItem.id)
+        .single();
+
+      if (!currentItem || currentItem.status !== "active") {
         alert("이 경매는 이미 종료되었습니다.");
-        fetchAllData(user.id);
+        fetchAuctionData();
         return;
       }
+
       if (currentItem.current_bid !== activeItem.current_bid) {
         alert("다른 참가자가 먼저 입찰했습니다. 다시 시도해주세요.");
-        fetchAllData(user.id);
+        fetchAuctionData();
         return;
       }
-      await supabase.from("auction_items").update({ current_bid: nextBid, highest_bidder_id: user.id }).eq("id", activeItem.id);
-      await supabase.from("bids").insert({ auction_item_id: activeItem.id, user_id: user.id, amount: nextBid });
+
+      // Update auction item
+      await supabase
+        .from("auction_items")
+        .update({ current_bid: nextBid, highest_bidder_id: user.id })
+        .eq("id", activeItem.id);
+
+      // Record bid
+      await supabase
+        .from("bids")
+        .insert({ auction_item_id: activeItem.id, user_id: user.id, amount: nextBid });
+
+      // Update user balance
       const newBalance = user.balance - nextBid;
-      await supabase.from("users").update({ balance: newBalance }).eq("id", user.id);
+      await supabase
+        .from("users")
+        .update({ balance: newBalance })
+        .eq("id", user.id);
+
       alert(`${activeItem.title}에 입찰했습니다!`);
-      fetchAllData(user.id);
+      fetchAuctionData();
     } catch (err: any) {
+      console.error("Bid error:", err);
       alert("입찰 처리 중 오류가 발생했습니다.");
     } finally {
       setLoading(false);
@@ -165,12 +153,12 @@ export default function AuctionPage() {
               <div className="space-y-3 max-h-[500px] overflow-y-auto pr-2 custom-scrollbar">
                 {allItems.map((item) => (
                   <div key={item.id} className={`flex justify-between items-center p-4 rounded-2xl border transition-all ${
-                    item.status === 'active' ? 'bg-[#FDF8F8] border-[#A52A2A]/20 shadow-sm' : 
-                    item.status === 'finished' ? 'bg-gray-50 border-transparent opacity-40' : 'bg-white border-[#F0EDE4]'
+                    item.status === "active" ? "bg-[#FDF8F8] border-[#A52A2A]/20 shadow-sm" :
+                    item.status === "finished" ? "bg-gray-50 border-transparent opacity-40" : "bg-white border-[#F0EDE4]"
                   }`}>
                     <div className="flex items-center gap-3">
-                      <div className={`w-1.5 h-1.5 rounded-full ${item.status === 'active' ? 'bg-[#A52A2A] animate-pulse' : 'bg-gray-200'}`}></div>
-                      <span className={`text-sm font-medium ${item.status === 'finished' ? 'text-gray-400 line-through' : 'text-[#1A1A1A]'}`}>{item.title}</span>
+                      <div className={`w-1.5 h-1.5 rounded-full ${item.status === "active" ? "bg-[#A52A2A] animate-pulse" : "bg-gray-200"}`}></div>
+                      <span className={`text-sm font-medium ${item.status === "finished" ? "text-gray-400 line-through" : "text-[#1A1A1A]"}`}>{item.title}</span>
                     </div>
                     <span className="text-[11px] font-sans font-bold text-gray-400">{item.current_bid}만</span>
                   </div>
