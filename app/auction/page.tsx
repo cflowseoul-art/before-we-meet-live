@@ -46,49 +46,60 @@ export default function AuctionPage() {
     }
   };
 
+  // app/auction/page.tsx 내의 기존 useEffect를 이 코드로 교체하세요
+
   useEffect(() => {
     const loadUser = () => {
       const stored = localStorage.getItem("auction_user");
-      const visited = sessionStorage.getItem("has_seen_modal");
-
       if (stored) {
         const parsedUser = JSON.parse(stored);
         fetchAllData(parsedUser.id);
-        if (!visited) setShowModal(true);
+        if (!sessionStorage.getItem("has_seen_modal")) setShowModal(true);
       }
     };
     loadUser();
 
-    // [강력한 실시간 리스너] 필터를 빼고 모든 system_settings 변화를 감지합니다.
+    console.log("🔔 실시간 구독을 시작합니다...");
+
     const channel = supabase.channel("auction_to_anywhere_sync")
-      .on("postgres_changes", { event: "*", schema: "public", table: "auction_items" }, () => {
+      .on("postgres_changes", { 
+        event: "*", 
+        schema: "public", 
+        table: "auction_items" 
+      }, (payload) => {
+        console.log("♻️ 경매 아이템 변경 감지:", payload);
         const stored = localStorage.getItem("auction_user");
         if (stored) fetchAllData(JSON.parse(stored).id);
       })
       .on("postgres_changes", { 
         event: "UPDATE", 
         schema: "public", 
-        table: "system_settings"
+        table: "system_settings" 
       }, (payload: any) => {
-        const key = payload.new.key;
-        const val = payload.new.value;
+        console.log("⚙️ 시스템 설정 변경 감지:", payload.new.key, "->", payload.new.value);
+        const { key, value } = payload.new;
 
-        // 1. 리포트 발행 신호 감지 (최우선)
-        if (key === "is_report_open" && val === "true") {
+        if (key === "is_report_open" && value === "true") {
+          console.log("🏁 리포트 페이지로 이동합니다.");
           const stored = localStorage.getItem("auction_user");
           if (stored) {
             const userId = JSON.parse(stored).id;
             router.push(`/1on1/loading/${userId}`);
           }
         } 
-        // 2. 피드(갤러리) 오픈 신호 감지
-        else if (key === "is_feed_open" && val === "true") {
+        else if (key === "is_feed_open" && value === "true") {
+          console.log("📸 피드 페이지로 이동합니다.");
           router.push("/feed");
         }
       })
-      .subscribe();
+      .subscribe((status) => {
+        console.log("📡 구독 상태:", status); 
+      });
 
-    return () => { supabase.removeChannel(channel); };
+    return () => { 
+      console.log("🔌 구독을 해제합니다.");
+      supabase.removeChannel(channel); 
+    };
   }, [router]);
 
   const closeIntroModal = () => {

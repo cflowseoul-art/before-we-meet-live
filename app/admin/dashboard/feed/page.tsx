@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import { supabase } from "@/lib/supabase";
 import { useRouter } from "next/navigation";
-import { Heart, Trophy, Users, TrendingUp, FileText } from "lucide-react"; // FileText 아이콘 추가
+import { Heart, Trophy, Users, TrendingUp, Sparkles, Loader2 } from "lucide-react";
 
 interface FeedItem {
   id: string;
@@ -22,27 +22,50 @@ export default function FeedDashboard() {
   const [totalLikes, setTotalLikes] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
   const [currentSession, setCurrentSession] = useState("01");
+  const [isFinalizing, setIsFinalizing] = useState(false);
 
   const API_KEY = process.env.NEXT_PUBLIC_GOOGLE_DRIVE_API_KEY;
   const FOLDER_ID = process.env.NEXT_PUBLIC_GOOGLE_DRIVE_FOLDER_ID;
 
-  // [추가] 리포트 발행 함수: DB 상태를 true로 변경
-  const releaseReport = async () => {
+  // Finalize all matches atomically via RPC, then release report
+  const finalizeAndReleaseReport = async () => {
     const isConfirm = confirm(
-      "📢 모든 유저에게 리포트를 발행하시겠습니까?\n발행 즉시 모든 유저의 화면이 '로딩 중'으로 전환됩니다."
+      "📢 모든 매칭을 계산하고 리포트를 발행하시겠습니까?\n\n1. 매칭 알고리즘이 실행됩니다 (가치관 70% + 피드 30%)\n2. 모든 유저의 화면이 리포트로 전환됩니다."
     );
-    
+
     if (!isConfirm) return;
 
-    const { error } = await supabase
-      .from("system_settings")
-      .update({ value: "true" })
-      .eq("key", "is_report_open");
+    setIsFinalizing(true);
 
-    if (error) {
-      alert("리포트 발행 중 오류가 발생했습니다: " + error.message);
-    } else {
-      alert("✅ 리포트 발행 성공! 유저들이 결과 페이지로 이동합니다.");
+    try {
+      // Step 1: Finalize all matches atomically via RPC
+      const response = await fetch('/api/admin/finalize-matches', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessionId: currentSession })
+      });
+
+      const result = await response.json();
+
+      if (!result.success) {
+        throw new Error(result.error || 'Failed to finalize matches');
+      }
+
+      // Step 2: Release report to all users
+      const { error } = await supabase
+        .from("system_settings")
+        .update({ value: "true" })
+        .eq("key", "is_report_open");
+
+      if (error) {
+        throw new Error(error.message);
+      }
+
+      alert(`✅ 매칭 완료! ${result.matches_created}개의 매칭이 생성되었습니다.\n유저들이 결과 페이지로 이동합니다.`);
+    } catch (err: any) {
+      alert("리포트 발행 중 오류가 발생했습니다: " + err.message);
+    } finally {
+      setIsFinalizing(false);
     }
   };
 
@@ -100,19 +123,26 @@ export default function FeedDashboard() {
   };
 
   useEffect(() => {
+    let sessionRef = currentSession;
+
     const init = async () => {
       const { data } = await supabase.from("system_settings").select("value").eq("key", "current_session").single();
       const session = data?.value || "01";
+      sessionRef = session;
       setCurrentSession(session);
       fetchFeedData(session);
     };
     init();
 
+    // Fixed: Use sessionRef to avoid stale closure issue
     const channel = supabase.channel("feed_admin_sync")
-      .on("postgres_changes", { event: "*", schema: "public", table: "feed_likes" }, () => fetchFeedData(currentSession))
+      .on("postgres_changes", { event: "*", schema: "public", table: "feed_likes" }, () => {
+        fetchFeedData(sessionRef);
+      })
       .subscribe();
+
     return () => { supabase.removeChannel(channel); };
-  }, [currentSession]);
+  }, []);
 
   if (isLoading) {
     return (
@@ -132,12 +162,21 @@ export default function FeedDashboard() {
           <h1 className="text-sm font-black uppercase tracking-[0.5em] text-white/90">Feed Popularity</h1>
         </div>
         <div className="flex gap-4">
-          {/* 리포트 발행 버튼 추가 */}
-          <button 
-            onClick={releaseReport}
-            className="px-5 py-2 bg-rose-600 hover:bg-rose-500 rounded-full text-[10px] font-black uppercase tracking-widest transition-all flex items-center gap-2 border border-rose-400 shadow-[0_0_20px_rgba(225,29,72,0.3)]"
+          {/* Finalize All Matches & Release Report Button */}
+          <button
+            onClick={finalizeAndReleaseReport}
+            disabled={isFinalizing}
+            className="px-5 py-2 bg-rose-600 hover:bg-rose-500 disabled:bg-rose-800 disabled:cursor-not-allowed rounded-full text-[10px] font-black uppercase tracking-widest transition-all flex items-center gap-2 border border-rose-400 shadow-[0_0_20px_rgba(225,29,72,0.3)]"
           >
-            <FileText size={14} /> Release Report
+            {isFinalizing ? (
+              <>
+                <Loader2 size={14} className="animate-spin" /> Finalizing...
+              </>
+            ) : (
+              <>
+                <Sparkles size={14} /> Finalize All & Report
+              </>
+            )}
           </button>
           
           <button onClick={() => router.push("/admin/dashboard/auction")} className="px-5 py-2 bg-white/5 rounded-full text-[10px] font-black uppercase tracking-widest border border-white/10 hover:bg-[#A52A2A]/20 transition-all">Auction</button>

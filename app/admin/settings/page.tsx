@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import { supabase } from "@/lib/supabase";
 import { useRouter } from "next/navigation";
-import { ChevronLeft, LayoutDashboard, UserPlus, Trash2, RotateCcw, Sparkles, Radio } from "lucide-react";
+import { ChevronLeft, LayoutDashboard, UserPlus, Trash2, RotateCcw, Sparkles, Loader2, CheckCircle2 } from "lucide-react";
 
 export default function AdminSettings() {
   const router = useRouter();
@@ -12,49 +12,72 @@ export default function AdminSettings() {
   const [users, setUsers] = useState<any[]>([]);
   const [showDriveModal, setShowDriveModal] = useState(false);
   const [targetUser, setTargetUser] = useState<any>(null);
+  const [isPhaseLoading, setIsPhaseLoading] = useState<string | null>(null);
+  const [phaseSuccess, setPhaseSuccess] = useState<string | null>(null);
+  const [isSessionLoading, setIsSessionLoading] = useState(false);
+  const [sessionSuccess, setSessionSuccess] = useState(false);
 
   const fetchSettings = async () => {
-    const { data: p } = await supabase.from("system_settings").select("value").eq("key", "current_phase").single();
-    const { data: s } = await supabase.from("system_settings").select("value").eq("key", "current_session").single();
+    // Use API route to fetch settings (bypasses RLS)
+    try {
+      const res = await fetch('/api/admin/phase');
+      const data = await res.json();
+      if (data.success && data.settings) {
+        setPhase(data.settings.current_phase || '');
+        setSession(data.settings.current_session || '01');
+      }
+    } catch (err) {
+      console.error('Failed to fetch settings:', err);
+    }
+
+    // Users can still be fetched with anon key (no RLS on users)
     const { data: u } = await supabase.from("users").select("*").order("created_at", { ascending: false });
-    if (p) setPhase(p.value);
-    if (s) setSession(s.value);
     if (u) setUsers(u);
   };
 
-  useEffect(() => { 
-    fetchSettings(); 
+  useEffect(() => {
+    fetchSettings();
   }, []);
 
   // [핵심 로직] 행사 단계 전환 및 유저 화면 강제 리다이렉션 제어
   const changePhase = async (v: string) => {
-    const phaseNames: any = { 
-      auction: "옥션 진행", 
-      feed: "갤러리(피드) 오픈", 
-      report: "최종 리포트 발행" 
+    const phaseNames: any = {
+      auction: "옥션 진행",
+      feed: "갤러리(피드) 오픈",
+      report: "최종 리포트 발행"
     };
 
     if (!confirm(`[${phaseNames[v]}] 단계로 전환하시겠습니까? 모든 유저의 화면이 즉시 리다이렉트됩니다.`)) return;
 
+    setIsPhaseLoading(v);
+    setPhaseSuccess(null);
+
     try {
-      // 1. 현재 페이즈 업데이트
-      await supabase.from("system_settings").upsert({ key: "current_phase", value: v });
+      // Use API route with service role to bypass RLS
+      const res = await fetch('/api/admin/phase', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phase: v })
+      });
 
-      // 2. 유저 페이지 감시용 플래그 동기화
-      // auction: 둘 다 false / feed: feed만 true / report: 둘 다 true
-      const isFeedOpen = (v === 'feed' || v === 'report') ? "true" : "false";
-      const isReportOpen = (v === 'report') ? "true" : "false";
+      const result = await res.json();
 
-      await Promise.all([
-        supabase.from("system_settings").upsert({ key: "is_feed_open", value: isFeedOpen }),
-        supabase.from("system_settings").upsert({ key: "is_report_open", value: isReportOpen })
-      ]);
+      if (!result.success) {
+        throw new Error(result.error || 'Failed to update phase');
+      }
 
       setPhase(v);
-      alert(`✅ 시스템이 [${phaseNames[v]}] 모드로 전환되었습니다.`);
-    } catch (err) {
-      console.error(err);
-      alert("단계 전환 중 오류가 발생했습니다.");
+      setPhaseSuccess(v);
+
+      // Clear success indicator after 3 seconds
+      setTimeout(() => setPhaseSuccess(null), 3000);
+
+      console.log(`✅ Phase changed to ${v}:`, result);
+    } catch (err: any) {
+      console.error('Phase change error:', err);
+      alert("단계 전환 중 오류가 발생했습니다: " + err.message);
+    } finally {
+      setIsPhaseLoading(null);
     }
   };
 
@@ -104,9 +127,35 @@ export default function AdminSettings() {
   };
 
   const changeSession = async (v: string) => {
-    await supabase.from("system_settings").upsert({ key: "current_session", value: v });
-    setSession(v);
-    alert("회차가 저장되었습니다.");
+    setIsSessionLoading(true);
+    setSessionSuccess(false);
+
+    try {
+      const res = await fetch('/api/admin/session', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ session: v })
+      });
+
+      const result = await res.json();
+
+      if (!result.success) {
+        throw new Error(result.error || 'Failed to update session');
+      }
+
+      setSession(v);
+      setSessionSuccess(true);
+
+      // Clear success indicator after 3 seconds
+      setTimeout(() => setSessionSuccess(false), 3000);
+
+      console.log('✅ Session updated:', result);
+    } catch (err: any) {
+      console.error('Session update error:', err);
+      alert("회차 저장 중 오류가 발생했습니다: " + err.message);
+    } finally {
+      setIsSessionLoading(false);
+    }
   };
 
   const handleDeleteUser = async (user: any) => {
@@ -138,17 +187,26 @@ export default function AdminSettings() {
         </div>
         <div className="grid grid-cols-3 gap-3">
           {['auction', 'feed', 'report'].map(p => (
-            <button 
-              key={p} 
-              onClick={() => changePhase(p)} 
-              className={`py-5 rounded-2xl text-[10px] font-black uppercase tracking-widest border transition-all flex flex-col items-center gap-2 ${
-                phase === p 
-                ? 'bg-[#A52A2A] border-transparent scale-105 shadow-[0_0_20px_rgba(165,42,42,0.4)]' 
-                : 'border-white/10 opacity-30 hover:opacity-100'
-              }`}
+            <button
+              key={p}
+              onClick={() => changePhase(p)}
+              disabled={isPhaseLoading !== null}
+              className={`py-5 rounded-2xl text-[10px] font-black uppercase tracking-widest border transition-all flex flex-col items-center gap-2 disabled:cursor-not-allowed ${
+                phase === p
+                ? 'bg-[#A52A2A] border-transparent scale-105 shadow-[0_0_20px_rgba(165,42,42,0.4)]'
+                : 'border-white/10 opacity-30 hover:opacity-100 disabled:opacity-20'
+              } ${phaseSuccess === p ? 'ring-2 ring-green-500 ring-offset-2 ring-offset-[#1A1A1A]' : ''}`}
             >
-              {p}
-              {phase === p && <div className="w-1 h-1 bg-white rounded-full animate-bounce" />}
+              {isPhaseLoading === p ? (
+                <Loader2 size={16} className="animate-spin" />
+              ) : phaseSuccess === p ? (
+                <CheckCircle2 size={16} className="text-green-400" />
+              ) : (
+                p
+              )}
+              {phase === p && !isPhaseLoading && !phaseSuccess && (
+                <div className="w-1 h-1 bg-white rounded-full animate-bounce" />
+              )}
             </button>
           ))}
         </div>
@@ -180,14 +238,30 @@ export default function AdminSettings() {
             type="text"
             value={session}
             onChange={(e) => setSession(e.target.value)}
-            className="w-20 text-center text-2xl font-black border-2 border-[#EEEBDE] rounded-xl py-3 focus:border-[#A52A2A] outline-none"
+            disabled={isSessionLoading}
+            className="w-20 text-center text-2xl font-black border-2 border-[#EEEBDE] rounded-xl py-3 focus:border-[#A52A2A] outline-none disabled:bg-gray-100"
             placeholder="01"
           />
           <button
             onClick={() => changeSession(session)}
-            className="px-6 py-3 bg-[#1A1A1A] text-white rounded-xl text-[10px] font-black uppercase tracking-widest"
+            disabled={isSessionLoading}
+            className={`px-6 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest flex items-center gap-2 transition-all disabled:cursor-not-allowed ${
+              sessionSuccess
+                ? 'bg-green-600 text-white'
+                : 'bg-[#1A1A1A] text-white hover:bg-[#A52A2A]'
+            }`}
           >
-            저장
+            {isSessionLoading ? (
+              <>
+                <Loader2 size={14} className="animate-spin" /> 저장 중...
+              </>
+            ) : sessionSuccess ? (
+              <>
+                <CheckCircle2 size={14} /> 저장 완료
+              </>
+            ) : (
+              '저장'
+            )}
           </button>
         </div>
       </section>

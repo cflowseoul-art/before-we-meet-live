@@ -18,6 +18,7 @@ export default function UserReportPage({ params }: { params: any }) {
     const { data: settings } = await supabase.from("system_settings").select("*");
     const isReportOpen = settings?.find(s => s.key === "is_report_open")?.value === "true";
     const isFeedOpen = settings?.find(s => s.key === "is_feed_open")?.value === "true";
+    const currentSession = settings?.find(s => s.key === "current_session")?.value || "01";
 
     // 만약 어드민이 리포트를 닫았다면, 현재 단계에 맞는 곳으로 강제 소환
     if (!isReportOpen) {
@@ -26,23 +27,44 @@ export default function UserReportPage({ params }: { params: any }) {
       return;
     }
 
-    // 2. 내 정보 및 매칭 상대 가져오기
+    // 2. 내 정보 가져오기
     const { data: userData } = await supabase.from("users").select("*").eq("id", userId).single();
-    
+
     if (userData) {
       setUser(userData);
       const myGender = userData.gender?.trim() || "";
       const target = (myGender === '여성' || myGender === '여') ? '남성' : '여성';
       setTargetGender(target);
 
+      // 3. 미리 계산된 매칭 결과 가져오기 (RPC로 생성된 데이터)
       const { data: matchData } = await supabase
-        .from("users")
-        .select("id, nickname, real_name, gender")
-        .neq("id", userId)
-        .eq("gender", target)
+        .from("matches")
+        .select(`
+          match_rank,
+          final_score,
+          auction_similarity,
+          feed_score,
+          matched_user:matched_user_id (
+            id,
+            nickname,
+            real_name,
+            gender
+          )
+        `)
+        .eq("user_id", userId)
+        .eq("session_id", currentSession)
+        .order("match_rank", { ascending: true })
         .limit(3);
-      
-      setMatches(matchData || []);
+
+      // Transform the data to expected format
+      const formattedMatches = matchData?.map(m => ({
+        ...m.matched_user,
+        final_score: m.final_score,
+        auction_similarity: m.auction_similarity,
+        feed_score: m.feed_score
+      })) || [];
+
+      setMatches(formattedMatches);
     }
     setIsLoading(false);
   };
@@ -92,11 +114,12 @@ export default function UserReportPage({ params }: { params: any }) {
           <h3 className="text-[10px] font-sans font-black tracking-[0.3em] text-gray-300 uppercase text-center mb-6 italic">Destined Connections</h3>
           {matches.length > 0 ? (
             matches.map((match, idx) => (
-              <MatchingCard 
+              <MatchingCard
                 key={match.id}
                 index={idx + 1}
                 nickname={match.nickname}
                 matchType={`${targetGender} 매칭`}
+                finalScore={match.final_score}
               />
             ))
           ) : (

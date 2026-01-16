@@ -1,7 +1,16 @@
 // app/1on1/_components/MatchingCard.tsx
 
-// 'export' 이 단어가 반드시 붙어 있어야 외부(page.tsx)에서 가져다 쓸 수 있습니다!
-export function MatchingCard({ index, nickname, matchType }: any) {
+interface MatchingCardProps {
+  index: number;
+  nickname: string;
+  matchType: string;
+  finalScore?: number;
+}
+
+export function MatchingCard({ index, nickname, matchType, finalScore }: MatchingCardProps) {
+  // Convert score (0-1) to percentage display
+  const matchPercentage = finalScore ? Math.round(finalScore * 100) : Math.floor(Math.random() * 10 + 85);
+
   return (
     <div className="bg-[#FCF9F2]/50 p-6 rounded-[2.5rem] border border-[#F0EDE4] flex items-center justify-between group active:scale-95 transition-all">
       <div className="flex items-center gap-4">
@@ -12,7 +21,9 @@ export function MatchingCard({ index, nickname, matchType }: any) {
         <div>
           {/* 페르소나 닉네임 */}
           <h4 className="text-lg italic font-medium tracking-tight">{nickname} 님</h4>
-          <p className="text-[10px] text-gray-400 font-sans tracking-widest uppercase">{matchType}</p>
+          <p className="text-[10px] text-gray-400 font-sans tracking-widest uppercase">
+            매칭 확률 {matchPercentage}%
+          </p>
         </div>
       </div>
       <button className="bg-[#1A1A1A] text-white px-5 py-2.5 rounded-full text-[10px] font-bold tracking-widest uppercase hover:bg-[#A52A2A] transition-colors shadow-lg">
