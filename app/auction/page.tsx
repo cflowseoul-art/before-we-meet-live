@@ -73,6 +73,27 @@ export default function AuctionPage() {
         setShowModal(true);
       }
     }
+
+    // 직접 Realtime 구독 추가
+    const channel = supabase
+      .channel('auction_page_realtime')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'auction_items' }, () => {
+        console.log('🔄 Auction items changed - refreshing');
+        fetchAuctionData();
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'bids' }, () => {
+        console.log('💰 Bids changed - refreshing');
+        fetchAuctionData();
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'users' }, () => {
+        console.log('👤 Users changed - refreshing');
+        fetchAuctionData();
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, [fetchAuctionData]);
 
   const closeIntroModal = () => {
@@ -88,70 +109,49 @@ export default function AuctionPage() {
       return;
     }
 
-    if (user.balance < bidAmountNum) {
-      alert(`잔액이 부족합니다. 현재 잔액: ${user.balance.toLocaleString()}만원`);
-      return;
-    }
-
     setLoading(true);
     try {
-      const { data: currentItem } = await supabase
-        .from("auction_items")
-        .select("status, current_bid, highest_bidder_id")
-        .eq("id", activeItem.id)
-        .single();
+      const res = await fetch('/api/auction/bid', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          itemId: activeItem.id,
+          userId: user.id,
+          bidAmount: bidAmountNum
+        })
+      });
 
-      if (!currentItem || currentItem.status !== "active") {
-        alert("이 경매는 이미 종료되었습니다.");
-        fetchAuctionData();
-        return;
-      }
+      const result = await res.json();
 
-      const newMinBid = currentItem.current_bid + 100;
-      if (bidAmountNum < newMinBid) {
-        alert(`다른 참가자가 먼저 입찰했습니다. 최소 ${newMinBid.toLocaleString()}만원 이상 입찰해야 합니다.`);
-        fetchAuctionData();
-        return;
-      }
-
-      if (currentItem.highest_bidder_id && currentItem.current_bid > 0) {
-        const previousBidderId = currentItem.highest_bidder_id;
-        const refundAmount = currentItem.current_bid;
-
-        const { data: previousBidder } = await supabase
-          .from("users")
-          .select("balance")
-          .eq("id", previousBidderId)
-          .single();
-
-        if (previousBidder) {
-          await supabase
-            .from("users")
-            .update({ balance: previousBidder.balance + refundAmount })
-            .eq("id", previousBidderId);
-
-          console.log(`환불 완료: ${previousBidderId}에게 ${refundAmount}만원 환불`);
+      if (!result.success) {
+        if (result.error === 'Insufficient balance') {
+          alert(`잔액이 부족합니다. 필요: ${result.required?.toLocaleString()}만원, 현재: ${result.current?.toLocaleString()}만원`);
+        } else if (result.error === 'Auction is not active') {
+          alert("이 경매는 이미 종료되었습니다.");
+        } else if (result.minBid) {
+          alert(`다른 참가자가 먼저 입찰했습니다. 최소 ${result.minBid.toLocaleString()}만원 이상 입찰해야 합니다.`);
+        } else {
+          alert("입찰 처리 중 오류가 발생했습니다.");
         }
+        fetchAuctionData();
+        return;
       }
 
-      await supabase
-        .from("auction_items")
-        .update({ current_bid: bidAmountNum, highest_bidder_id: user.id })
-        .eq("id", activeItem.id);
+      console.log(`✅ 입찰 성공: ${activeItem.title} → ${bidAmountNum}만원`);
 
-      await supabase
-        .from("bids")
-        .insert({ auction_item_id: activeItem.id, user_id: user.id, amount: bidAmountNum });
+      // 낙관적 업데이트: 즉시 UI 반영
+      setActiveItem((prev: any) => prev ? { ...prev, current_bid: bidAmountNum, highest_bidder_id: user.id } : prev);
+      setAllItems((prev: any[]) => prev.map(item =>
+        item.id === activeItem.id ? { ...item, current_bid: bidAmountNum, highest_bidder_id: user.id } : item
+      ));
 
-      const newBalance = user.balance - bidAmountNum;
-      await supabase
-        .from("users")
-        .update({ balance: newBalance })
-        .eq("id", user.id);
+      // 유저 잔액도 즉시 업데이트
+      const newBalance = result.newBalance;
+      setUser((prev: any) => ({ ...prev, balance: newBalance }));
+      localStorage.setItem("auction_user", JSON.stringify({ ...user, balance: newBalance }));
 
       alert(`${activeItem.title}에 ${bidAmountNum.toLocaleString()}만원으로 입찰 완료!`);
       setBidAmount("");
-      fetchAuctionData();
     } catch (err: any) {
       console.error("Bid error:", err);
       alert("입찰 처리 중 오류가 발생했습니다.");

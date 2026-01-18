@@ -109,29 +109,48 @@ export function usePhaseRedirect(options: UsePhaseRedirectOptions) {
   }, [currentPage, getUserId]);
 
   // Fetch initial settings and check for redirect
-  const fetchAndCheckSettings = useCallback(async (): Promise<SystemSettings | null> => {
-    const { data, error } = await supabase
-      .from("system_settings")
-      .select("key, value");
-
-    if (error || !data) {
-      console.error("Failed to fetch settings:", error);
-      return null;
-    }
-
-    const settings: SystemSettings = {
+  const fetchAndCheckSettings = useCallback(async (retryCount = 0): Promise<SystemSettings | null> => {
+    // Use API endpoint to bypass RLS
+    let settings: SystemSettings = {
       current_phase: "",
       is_feed_open: "false",
       is_report_open: "false",
       current_session: "01"
     };
 
-    data.forEach(row => {
-      const key = row.key as keyof SystemSettings;
-      if (key in settings) {
-        settings[key] = String(row.value); // Ensure TEXT type
+    try {
+      const res = await fetch('/api/admin/phase', {
+        cache: 'no-store',
+        signal: AbortSignal.timeout(5000) // 5초 타임아웃
+      });
+
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status}`);
       }
-    });
+
+      const result = await res.json();
+
+      if (result.success && result.settings) {
+        settings = {
+          current_phase: String(result.settings.current_phase || ""),
+          is_feed_open: String(result.settings.is_feed_open || "false"),
+          is_report_open: String(result.settings.is_report_open || "false"),
+          current_session: String(result.settings.current_session || "01")
+        };
+      } else {
+        console.warn("Settings fetch returned error:", result.error);
+        return null;
+      }
+    } catch (err) {
+      // 최대 2번 재시도
+      if (retryCount < 2) {
+        console.log(`Settings fetch retry ${retryCount + 1}/2...`);
+        await new Promise(r => setTimeout(r, 1000));
+        return fetchAndCheckSettings(retryCount + 1);
+      }
+      console.warn("Failed to fetch settings after retries:", err);
+      return null;
+    }
 
     console.log("📋 Fetched settings:", settings);
 

@@ -4,9 +4,9 @@ import { useState, useEffect } from "react";
 import { supabase } from "@/lib/supabase";
 import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
-import { 
-  ChevronLeft, LayoutDashboard, UserPlus, Trash2, RotateCcw, 
-  Sparkles, Loader2, CheckCircle2, AlertTriangle, RefreshCw 
+import {
+  ChevronLeft, LayoutDashboard, UserPlus, Trash2, RotateCcw,
+  Sparkles, Loader2, CheckCircle2, AlertTriangle, RefreshCw, Gavel, Heart
 } from "lucide-react";
 import { DESIGN_TOKENS } from "@/lib/design-tokens";
 import { AUCTION_ITEMS } from "@/app/constants";
@@ -26,6 +26,8 @@ export default function AdminSettings() {
   const [sessionSuccess, setSessionSuccess] = useState(false);
   const [isResetLoading, setIsResetLoading] = useState(false);
   const [isSyncLoading, setIsSyncLoading] = useState(false);
+  const [isAuctionResetLoading, setIsAuctionResetLoading] = useState(false);
+  const [isFeedResetLoading, setIsFeedResetLoading] = useState(false);
   const [showResetConfirm, setShowResetConfirm] = useState(false);
   const [resetConfirmText, setResetConfirmText] = useState("");
 
@@ -66,7 +68,7 @@ export default function AdminSettings() {
       // 2. AUCTION_ITEMS 문자열 배열을 DB 구조에 맞게 매핑
       const itemsToInsert = AUCTION_ITEMS.map((val) => ({
         title: val,       // ["사랑", "돈"...] 에서 문자열 하나가 곧 title
-        current_bid: 1,   // 기본 시작가
+        current_bid: 0,   // 기본 시작가
         status: 'pending'
       }));
 
@@ -80,6 +82,42 @@ export default function AdminSettings() {
       alert("동기화 중 오류 발생: " + err.message);
     } finally {
       setIsSyncLoading(false);
+    }
+  };
+
+  const resetFeed = async () => {
+    if (!confirm("피드를 초기화하시겠습니까?\n- 모든 좋아요 삭제")) return;
+
+    setIsFeedResetLoading(true);
+    try {
+      await supabase.from("feed_likes").delete().neq("id", "00000000-0000-0000-0000-000000000000");
+      alert("피드가 초기화되었습니다.");
+    } catch (err: any) {
+      alert("초기화 중 오류 발생: " + err.message);
+    } finally {
+      setIsFeedResetLoading(false);
+    }
+  };
+
+  const resetAuction = async () => {
+    if (!confirm("경매를 초기화하시겠습니까?\n- 모든 입찰 내역 삭제\n- 모든 아이템 pending 상태로\n- 참가자 잔액 1000만원으로 복구")) return;
+
+    setIsAuctionResetLoading(true);
+    try {
+      await supabase.from("bids").delete().neq("id", "00000000-0000-0000-0000-000000000000");
+      await supabase.from("auction_items").update({
+        status: 'pending',
+        current_bid: 0,
+        highest_bidder_id: null
+      }).neq("id", "00000000-0000-0000-0000-000000000000");
+      await supabase.from("users").update({ balance: 1000 }).neq("id", "00000000-0000-0000-0000-000000000000");
+
+      alert("경매가 초기화되었습니다.");
+      fetchSettings();
+    } catch (err: any) {
+      alert("초기화 중 오류 발생: " + err.message);
+    } finally {
+      setIsAuctionResetLoading(false);
     }
   };
 
@@ -286,6 +324,46 @@ export default function AdminSettings() {
             whileTap={{ scale: 0.95 }}
           >
             {isSyncLoading ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />} 가치관 동기화
+          </motion.button>
+        </div>
+      </motion.section>
+
+      {/* 2.5. Auction Reset */}
+      <motion.section className="mb-8" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}>
+        <div className="p-8 flex justify-between items-center shadow-sm" style={{ backgroundColor: "#FEF2F2", border: "1px solid #FECACA", borderRadius: "2.5rem" }}>
+          <div>
+            <h3 className="text-sm font-sans font-black uppercase tracking-widest mb-1 italic text-red-600">Auction Reset</h3>
+            <p className="text-[10px] font-sans font-medium text-red-400">입찰 내역 삭제, 아이템 초기화, 잔액 1000만원 복구</p>
+          </div>
+          <motion.button
+            onClick={resetAuction}
+            disabled={isAuctionResetLoading}
+            className="flex items-center gap-2 px-6 py-3 text-white text-[10px] font-sans font-black uppercase tracking-widest shadow-md bg-red-500"
+            style={{ borderRadius: borderRadius.card }}
+            whileHover={{ scale: 1.05 }}
+            whileTap={{ scale: 0.95 }}
+          >
+            {isAuctionResetLoading ? <Loader2 size={14} className="animate-spin" /> : <Gavel size={14} />} 경매 초기화
+          </motion.button>
+        </div>
+      </motion.section>
+
+      {/* 2.6. Feed Reset */}
+      <motion.section className="mb-8" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}>
+        <div className="p-8 flex justify-between items-center shadow-sm" style={{ backgroundColor: "#FDF2F8", border: "1px solid #FBCFE8", borderRadius: "2.5rem" }}>
+          <div>
+            <h3 className="text-sm font-sans font-black uppercase tracking-widest mb-1 italic text-pink-600">Feed Reset</h3>
+            <p className="text-[10px] font-sans font-medium text-pink-400">모든 좋아요(하트) 기록을 삭제합니다.</p>
+          </div>
+          <motion.button
+            onClick={resetFeed}
+            disabled={isFeedResetLoading}
+            className="flex items-center gap-2 px-6 py-3 text-white text-[10px] font-sans font-black uppercase tracking-widest shadow-md bg-pink-500"
+            style={{ borderRadius: borderRadius.card }}
+            whileHover={{ scale: 1.05 }}
+            whileTap={{ scale: 0.95 }}
+          >
+            {isFeedResetLoading ? <Loader2 size={14} className="animate-spin" /> : <Heart size={14} />} 피드 초기화
           </motion.button>
         </div>
       </motion.section>

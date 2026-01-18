@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { supabase } from "@/lib/supabase";
 import { useRouter } from "next/navigation";
-import { Activity, Trophy, History, Settings, Play, RotateCcw } from "lucide-react";
+import { Activity, Trophy, History, Settings, Play, RotateCcw, RefreshCw, Heart } from "lucide-react";
 
 export default function AuctionDashboard() {
   const router = useRouter();
@@ -39,22 +39,72 @@ export default function AuctionDashboard() {
   }, []);
 
   const handleStartAuction = async (itemId: number) => {
-    const activeItem = items.find(i => i.status === 'active');
-    if (activeItem && activeItem.id !== itemId) {
-      await supabase.from("auction_items").update({ status: 'finished' }).eq('id', activeItem.id);
+    // 낙관적 업데이트: 즉시 UI 반영
+    setItems(prev => prev.map(item => {
+      if (item.status === 'active') return { ...item, status: 'finished' };
+      if (item.id === itemId) return { ...item, status: 'active' };
+      return item;
+    }));
+
+    // DB 업데이트 (await로 확실하게 반영)
+    const currentActive = items.find(i => i.status === 'active');
+    if (currentActive && currentActive.id !== itemId) {
+      await supabase.from("auction_items").update({ status: 'finished' }).eq('id', currentActive.id);
     }
     await supabase.from("auction_items").update({ status: 'active' }).eq('id', itemId);
-    fetchLive();
   };
 
   const handleFinishAuction = async (itemId: number) => {
+    // 낙관적 업데이트
+    setItems(prev => prev.map(item =>
+      item.id === itemId ? { ...item, status: 'finished' } : item
+    ));
     await supabase.from("auction_items").update({ status: 'finished' }).eq('id', itemId);
-    fetchLive();
   };
 
   const handleRevertToPending = async (itemId: number) => {
+    // 낙관적 업데이트
+    setItems(prev => prev.map(item =>
+      item.id === itemId ? { ...item, status: 'pending' } : item
+    ));
     await supabase.from("auction_items").update({ status: 'pending' }).eq('id', itemId);
-    fetchLive();
+  };
+
+  const handleResetFeed = async () => {
+    if (!confirm("피드를 초기화하시겠습니까?\n- 모든 좋아요 삭제")) return;
+
+    try {
+      await supabase.from("feed_likes").delete().neq("id", "00000000-0000-0000-0000-000000000000");
+      alert("피드가 초기화되었습니다.");
+    } catch (err) {
+      console.error("Feed reset error:", err);
+      alert("초기화 중 오류가 발생했습니다.");
+    }
+  };
+
+  const handleResetAuction = async () => {
+    if (!confirm("경매를 초기화하시겠습니까?\n- 모든 입찰 내역 삭제\n- 모든 아이템 pending 상태로\n- 참가자 잔액 1000만원으로 복구")) return;
+
+    try {
+      // 1. 입찰 내역 삭제
+      await supabase.from("bids").delete().neq("id", "00000000-0000-0000-0000-000000000000");
+
+      // 2. 아이템 초기화
+      await supabase.from("auction_items").update({
+        status: 'pending',
+        current_bid: 0,
+        highest_bidder_id: null
+      }).neq("id", "00000000-0000-0000-0000-000000000000");
+
+      // 3. 유저 잔액 초기화
+      await supabase.from("users").update({ balance: 1000 }).neq("id", "00000000-0000-0000-0000-000000000000");
+
+      alert("경매가 초기화되었습니다.");
+      fetchLive();
+    } catch (err) {
+      console.error("Reset error:", err);
+      alert("초기화 중 오류가 발생했습니다.");
+    }
   };
 
   useEffect(() => {
@@ -70,34 +120,36 @@ export default function AuctionDashboard() {
   return (
     <main className="h-screen w-full bg-[#FDFDFD] text-[#1A1A1A] antialiased flex flex-col overflow-hidden">
       {/* 1. Header Navigation */}
-      <nav className="h-[70px] border-b border-[#EEEBDE] px-10 flex justify-between items-center bg-white shrink-0">
-        <div className="flex items-center gap-4">
-          <h1 className="text-xl font-serif italic font-black cursor-pointer" onClick={() => router.push("/admin")}>Me Before You</h1>
-          <span className="text-[9px] font-bold uppercase tracking-[0.4em] text-[#A52A2A] bg-[#FDF8F8] px-3 py-1 rounded-full border border-[#A52A2A]/10">Admin Console</span>
+      <nav className="h-[50px] md:h-[70px] border-b border-[#EEEBDE] px-4 md:px-10 flex justify-between items-center bg-white shrink-0">
+        <div className="flex items-center gap-2 md:gap-4">
+          <h1 className="text-sm md:text-xl font-serif italic font-black cursor-pointer" onClick={() => router.push("/admin")}>Me Before You</h1>
+          <span className="hidden sm:inline text-[8px] md:text-[9px] font-bold uppercase tracking-[0.2em] md:tracking-[0.4em] text-[#A52A2A] bg-[#FDF8F8] px-2 md:px-3 py-1 rounded-full border border-[#A52A2A]/10">Admin</span>
         </div>
-        <button onClick={() => router.push("/admin/settings")} className="p-2.5 rounded-full border border-[#EEEBDE] hover:bg-[#F0EDE4] transition-all"><Settings size={16} /></button>
+        <div className="flex items-center gap-1 md:gap-2">
+          <button onClick={handleResetFeed} className="p-2 md:p-2.5 rounded-full border border-pink-200 hover:bg-pink-50 text-pink-500 transition-all" title="피드 초기화"><Heart size={14} className="md:w-4 md:h-4" /></button>
+          <button onClick={handleResetAuction} className="p-2 md:p-2.5 rounded-full border border-red-200 hover:bg-red-50 text-red-500 transition-all" title="경매 초기화"><RefreshCw size={14} className="md:w-4 md:h-4" /></button>
+          <button onClick={() => router.push("/admin/settings")} className="p-2 md:p-2.5 rounded-full border border-[#EEEBDE] hover:bg-[#F0EDE4] transition-all"><Settings size={14} className="md:w-4 md:h-4" /></button>
+        </div>
       </nav>
 
-      {/* 2. Main Content Grid (3-Tier Structure) */}
-      <div className="flex-1 flex flex-col p-6 gap-6 overflow-hidden">
-        
-        {/* TOP: Active Now | Inventory Flow (Horizontal) */}
-        <div className="h-[300px] grid grid-cols-2 gap-6 shrink-0">
+      {/* 2. Main Content Grid */}
+      <div className="flex-1 flex flex-col p-2 md:p-6 gap-2 md:gap-4 overflow-hidden">
+
+        {/* TOP: Active Now | Inventory Flow */}
+        <div className="h-[30%] md:h-[35%] grid grid-cols-2 gap-2 md:gap-4 shrink-0">
           {/* Active Now */}
           <section className="flex flex-col min-h-0">
-            <h3 className="text-[10px] font-black uppercase tracking-[0.3em] mb-2 text-[#A52A2A]">Active Now</h3>
-            <div className="flex-1 bg-white rounded-[2.5rem] border border-[#EEEBDE] shadow-xl p-8 flex flex-col justify-center">
+            <h3 className="text-[7px] md:text-[10px] font-black uppercase tracking-wider md:tracking-[0.3em] mb-1 text-[#A52A2A]">Active Now</h3>
+            <div className="flex-1 bg-white rounded-xl md:rounded-[2rem] border border-[#EEEBDE] shadow-lg p-2 md:p-6 flex flex-col justify-center overflow-hidden">
               <AnimatePresence mode="wait">
                 {activeItem ? (
-                  <motion.div key={activeItem.id} initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="flex justify-between items-center">
-                    <div>
-                      <h2 className="text-3xl font-serif italic font-black">{activeItem.title}</h2>
-                      <p className="text-4xl font-black mt-2">{activeItem.current_bid?.toLocaleString()}<span className="text-sm font-serif italic ml-1 opacity-40">만</span></p>
-                    </div>
-                    <button onClick={() => handleFinishAuction(activeItem.id)} className="px-8 py-4 bg-[#A52A2A] text-white rounded-2xl text-[10px] font-black uppercase tracking-widest hover:scale-105 transition-all">Finish</button>
+                  <motion.div key={activeItem.id} initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="flex flex-col gap-1 md:gap-3">
+                    <h2 className="text-[11px] sm:text-base md:text-xl lg:text-2xl font-serif italic font-black line-clamp-2">{activeItem.title}</h2>
+                    <p className="text-base sm:text-lg md:text-2xl lg:text-3xl font-black">{activeItem.current_bid?.toLocaleString()}<span className="text-[8px] md:text-xs font-serif italic ml-0.5 opacity-40">만</span></p>
+                    <button onClick={() => handleFinishAuction(activeItem.id)} className="px-2 py-1 md:px-6 md:py-3 bg-[#A52A2A] text-white rounded-md md:rounded-xl text-[7px] md:text-[9px] font-black uppercase tracking-wider self-start">Finish</button>
                   </motion.div>
                 ) : (
-                  <div className="text-center opacity-20 italic font-serif">Stage Empty</div>
+                  <div className="text-center opacity-20 italic font-serif text-[10px] md:text-sm">Stage Empty</div>
                 )}
               </AnimatePresence>
             </div>
@@ -105,21 +157,21 @@ export default function AuctionDashboard() {
 
           {/* Inventory Flow */}
           <section className="flex flex-col min-h-0">
-            <h3 className="text-[10px] font-black uppercase tracking-[0.3em] mb-2 text-gray-400">Inventory Flow</h3>
-            <div className="flex-1 bg-[#F0EDE4]/50 rounded-[2.5rem] border border-[#EEEBDE] p-6 overflow-y-auto custom-scrollbar">
-              <div className="space-y-2">
+            <h3 className="text-[7px] md:text-[10px] font-black uppercase tracking-wider md:tracking-[0.3em] mb-1 text-gray-400">Inventory</h3>
+            <div className="flex-1 bg-[#F0EDE4]/50 rounded-xl md:rounded-[2rem] border border-[#EEEBDE] p-1.5 md:p-4 overflow-y-auto custom-scrollbar">
+              <div className="space-y-1 md:space-y-2">
                 {pendingItems.map((item) => (
-                  <div key={item.id} className="bg-white p-4 rounded-xl flex justify-between items-center border border-transparent hover:border-[#A52A2A]/20 transition-all group">
-                    <span className="font-serif italic text-md">{item.title}</span>
-                    <button onClick={() => handleStartAuction(item.id)} className="px-4 py-2 bg-[#1A1A1A] text-white rounded-lg text-[9px] font-black uppercase tracking-widest flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-all"><Play size={10} fill="currentColor" /> Start</button>
+                  <div key={item.id} className="bg-white p-1.5 md:p-3 rounded-md md:rounded-lg flex justify-between items-center gap-1">
+                    <span className="font-serif italic text-[9px] md:text-sm truncate flex-1">{item.title}</span>
+                    <button onClick={() => handleStartAuction(item.id)} className="px-1.5 py-0.5 md:px-3 md:py-1.5 bg-[#1A1A1A] text-white rounded text-[6px] md:text-[8px] font-black uppercase shrink-0 flex items-center gap-0.5"><Play size={6} className="md:hidden" fill="currentColor" /><Play size={8} className="hidden md:block" fill="currentColor" /><span className="hidden sm:inline">Start</span></button>
                   </div>
                 ))}
                 {finishedItems.map((item) => (
-                  <div key={item.id} className="bg-white/40 p-4 rounded-xl border border-dashed border-[#EEEBDE] flex justify-between items-center group">
-                    <span className="font-serif italic text-md text-gray-300">{item.title}</span>
-                    <div className="flex gap-3 opacity-0 group-hover:opacity-100 transition-all">
-                      <button onClick={() => handleRevertToPending(item.id)} className="text-gray-400 hover:text-gray-600"><RotateCcw size={14} /></button>
-                      <button onClick={() => handleStartAuction(item.id)} className="text-[9px] font-black uppercase text-[#A52A2A]">Re-Start</button>
+                  <div key={item.id} className="bg-white/40 p-1.5 md:p-3 rounded-md md:rounded-lg border border-dashed border-[#EEEBDE] flex justify-between items-center gap-1">
+                    <span className="font-serif italic text-[9px] md:text-sm text-gray-300 truncate flex-1">{item.title}</span>
+                    <div className="flex gap-1 md:gap-2 shrink-0">
+                      <button onClick={() => handleRevertToPending(item.id)} className="text-gray-400 p-0.5"><RotateCcw size={10} className="md:hidden" /><RotateCcw size={14} className="hidden md:block" /></button>
+                      <button onClick={() => handleStartAuction(item.id)} className="text-[6px] md:text-[8px] font-black uppercase text-[#A52A2A]">Re</button>
                     </div>
                   </div>
                 ))}
@@ -128,36 +180,32 @@ export default function AuctionDashboard() {
           </section>
         </div>
 
-        {/* MIDDLE: Live Bid Stream (Dominant Section) */}
+        {/* MIDDLE: Live Bid Stream */}
         <section className="flex-1 flex flex-col min-h-0">
-          <h3 className="text-[10px] font-black uppercase tracking-[0.3em] mb-2 text-[#A52A2A]">Live Bid Stream</h3>
-          <div className="flex-1 bg-[#1A1A1A] rounded-[3rem] shadow-2xl p-10 flex flex-col overflow-hidden relative">
-            <div className="flex-1 overflow-y-auto custom-scrollbar-dark pr-4 space-y-6">
+          <h3 className="text-[7px] md:text-[10px] font-black uppercase tracking-wider md:tracking-[0.3em] mb-1 text-[#A52A2A]">Live Bids</h3>
+          <div className="flex-1 bg-[#1A1A1A] rounded-xl md:rounded-[2rem] shadow-xl p-2 md:p-4 flex flex-col overflow-hidden">
+            <div className="flex-1 overflow-y-auto custom-scrollbar-dark pr-1 md:pr-3 space-y-1 md:space-y-2">
               <AnimatePresence mode="popLayout">
-                {bids.map((bid, idx) => (
-                  <motion.div key={bid.id} initial={{ opacity: 0, y: 10 }} animate={{ opacity: idx === 0 ? 1 : 0.2 }} className={`flex justify-between items-end pb-6 border-b border-white/5 ${idx === 0 ? 'text-white' : 'text-white/30'}`}>
-                    <div className="space-y-1">
-                      <p className="text-[8px] font-bold uppercase tracking-widest opacity-40">Bidder</p>
-                      <p className="text-4xl font-serif italic font-bold leading-none">{users.find(u => u.id === bid.user_id)?.nickname || 'Guest'}</p>
-                    </div>
-                    <p className="text-6xl font-black tracking-tighter leading-none">{bid.amount.toLocaleString()}<span className="text-xl font-normal opacity-50 ml-2">만</span></p>
+                {bids.slice(0, 10).map((bid, idx) => (
+                  <motion.div key={bid.id} initial={{ opacity: 0, y: 5 }} animate={{ opacity: idx === 0 ? 1 : 0.3 }} className={`flex justify-between items-center pb-1 md:pb-2 border-b border-white/5 ${idx === 0 ? 'text-white' : 'text-white/30'}`}>
+                    <p className="text-[10px] sm:text-xs md:text-base font-serif italic font-bold truncate flex-1">{users.find(u => u.id === bid.user_id)?.nickname || 'Guest'}</p>
+                    <p className="text-sm sm:text-base md:text-xl font-black tracking-tight shrink-0">{bid.amount.toLocaleString()}<span className="text-[6px] md:text-xs font-normal opacity-50 ml-0.5">만</span></p>
                   </motion.div>
                 ))}
               </AnimatePresence>
             </div>
-            <div className="absolute bottom-6 right-10 text-[6rem] font-serif italic text-white/[0.03] pointer-events-none">History</div>
           </div>
         </section>
 
-        {/* BOTTOM: Identity Ranking (Compact Footer) */}
-        <section className="h-[100px] shrink-0 flex flex-col min-h-0">
-          <h3 className="text-[10px] font-black uppercase tracking-[0.3em] mb-2 text-gray-400">Identity Ranking</h3>
-          <div className="flex-1 bg-[#F0EDE4] rounded-full px-8 flex items-center gap-6 overflow-x-auto custom-scrollbar shadow-inner">
-            {users.slice(0, 15).map((u, idx) => (
-              <div key={u.id} className="flex-shrink-0 flex items-center gap-3">
-                <span className="text-lg font-serif italic text-[#A52A2A]/40 font-bold">{(idx + 1)}</span>
-                <span className="font-bold text-sm whitespace-nowrap">{u.nickname}</span>
-                <span className="text-[10px] font-black opacity-30 whitespace-nowrap">{u.wonItems.length} Won</span>
+        {/* BOTTOM: Identity Ranking - 컨텐츠에 맞게 자동 크기 */}
+        <section className="shrink-0">
+          <h3 className="text-[7px] md:text-[10px] font-black uppercase tracking-wider md:tracking-[0.3em] mb-1 text-gray-400">Ranking</h3>
+          <div className="bg-[#F0EDE4] rounded-xl md:rounded-2xl p-2 md:p-3 flex flex-wrap gap-1 md:gap-2 shadow-inner">
+            {users.slice(0, 10).map((u, idx) => (
+              <div key={u.id} className="flex items-center gap-1 md:gap-1.5 bg-white/60 rounded-lg px-1.5 md:px-2 py-1 md:py-1.5">
+                <span className="text-[10px] md:text-sm font-serif italic text-[#A52A2A]/60 font-bold">{(idx + 1)}</span>
+                <span className="font-bold text-[9px] md:text-xs whitespace-nowrap">{u.nickname}</span>
+                <span className="text-[7px] md:text-[9px] font-black text-[#A52A2A]/40">{u.wonItems.length}W</span>
               </div>
             ))}
           </div>
