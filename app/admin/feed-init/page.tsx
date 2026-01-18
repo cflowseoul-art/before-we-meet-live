@@ -1,17 +1,21 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import { motion } from "framer-motion";
 import { supabase } from "@/lib/supabase";
 import { ImageIcon, RefreshCw, CheckCircle, AlertCircle, ArrowLeft } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { parseDriveFileName } from "@/lib/utils/feed-parser";
+import { DESIGN_TOKENS } from "@/lib/design-tokens";
+
+const { colors, borderRadius } = DESIGN_TOKENS;
 
 export default function FeedInitPage() {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
   const [users, setUsers] = useState<any[]>([]);
   const [driveFiles, setDriveFiles] = useState<any[]>([]);
-  const [currentSession, setCurrentSession] = useState("01");
+  const [, setCurrentSession] = useState("01");
 
   const API_KEY = process.env.NEXT_PUBLIC_GOOGLE_DRIVE_API_KEY;
   const FOLDER_ID = process.env.NEXT_PUBLIC_GOOGLE_DRIVE_FOLDER_ID;
@@ -43,22 +47,44 @@ export default function FeedInitPage() {
   };
 
   return (
-    <main className="min-h-screen bg-[#0A0A0A] p-8 text-white font-serif antialiased">
+    <main className="min-h-screen p-8 font-serif antialiased" style={{ backgroundColor: colors.primary, color: "white" }}>
       <div className="max-w-5xl mx-auto space-y-10">
-        <header className="flex justify-between items-end">
+        <motion.header
+          className="flex justify-between items-end"
+          initial={{ opacity: 0, y: -20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.5 }}
+        >
           <div className="space-y-4">
-            <button onClick={() => router.push("/admin")} className="flex items-center gap-2 text-[10px] text-white/40 uppercase font-black tracking-widest hover:text-white transition-colors">
+            <motion.button
+              onClick={() => router.push("/admin")}
+              className="flex items-center gap-2 text-[10px] text-white/40 uppercase font-black tracking-widest hover:text-white transition-colors"
+              whileHover={{ x: -3 }}
+            >
               <ArrowLeft size={12} /> Back to Gateway
-            </button>
-            <h1 className="text-4xl italic tracking-tighter text-[#FFD700]">Feed Initializer</h1>
+            </motion.button>
+            <h1 className="text-4xl italic tracking-tighter" style={{ color: colors.accent }}>Feed Initializer</h1>
             <p className="text-[10px] font-sans font-black uppercase tracking-[0.3em] opacity-40 italic">Me Before You Control Center</p>
           </div>
-          <button onClick={handleSync} disabled={loading} className="bg-[#A52A2A] px-10 py-5 rounded-[2rem] font-sans font-black text-[10px] uppercase tracking-[0.2em] flex items-center gap-3 shadow-2xl active:scale-95 transition-all disabled:opacity-30">
+          <motion.button
+            onClick={handleSync}
+            disabled={loading}
+            className="px-10 py-5 font-sans font-black text-[10px] uppercase tracking-[0.2em] flex items-center gap-3 shadow-2xl disabled:opacity-30"
+            style={{ backgroundColor: colors.accent, borderRadius: "2rem" }}
+            whileHover={{ scale: 1.05 }}
+            whileTap={{ scale: 0.95 }}
+          >
             {loading ? <RefreshCw className="animate-spin" size={16} /> : <ImageIcon size={16} />} Scan & Sync Drive
-          </button>
-        </header>
+          </motion.button>
+        </motion.header>
 
-        <div className="bg-[#161616] rounded-[3rem] border border-white/5 overflow-hidden shadow-2xl">
+        <motion.div
+          className="border border-white/5 overflow-hidden shadow-2xl"
+          style={{ backgroundColor: "#161616", borderRadius: borderRadius.onboarding }}
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.2, duration: 0.5 }}
+        >
           <table className="w-full text-left border-collapse">
             <thead>
               <tr className="border-b border-white/5 bg-white/5 text-[9px] font-sans font-black uppercase tracking-[0.3em] text-white/40">
@@ -70,13 +96,19 @@ export default function FeedInitPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-white/5">
-              {users.map(u => {
+              {users.map((u, idx) => {
                 const userFiles = driveFiles.filter(f => {
                   const info = parseDriveFileName(f.name);
                   return info && info.realName === String(u.real_name).trim() && info.phoneSuffix === String(u.phone_suffix).trim();
                 });
                 return (
-                  <tr key={u.id} className="hover:bg-white/[0.02] transition-colors">
+                  <motion.tr
+                    key={u.id}
+                    className="hover:bg-white/[0.02] transition-colors"
+                    initial={{ opacity: 0, x: -20 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    transition={{ delay: 0.1 + idx * 0.03 }}
+                  >
                     <td className="p-8">
                       <p className="text-lg font-bold">{u.nickname}</p>
                       <p className="text-[10px] opacity-30 font-sans font-medium uppercase tracking-widest mt-1">{u.real_name} · {u.phone_suffix}</p>
@@ -86,21 +118,31 @@ export default function FeedInitPage() {
                       const exists = userFiles.some(f => parseDriveFileName(f.name)?.session === sessStr);
                       return (
                         <td key={num} className="p-8 text-center">
-                          {exists ? <CheckCircle size={20} className="text-green-500 mx-auto opacity-80 shadow-[0_0_15px_rgba(34,197,94,0.3)]" /> : <AlertCircle size={20} className="text-white/10 mx-auto" />}
+                          <motion.div
+                            initial={{ scale: 0 }}
+                            animate={{ scale: 1 }}
+                            transition={{ delay: 0.2 + idx * 0.03 + num * 0.05, type: "spring" }}
+                          >
+                            {exists ? (
+                              <CheckCircle size={20} className="text-green-500 mx-auto opacity-80 shadow-[0_0_15px_rgba(34,197,94,0.3)]" />
+                            ) : (
+                              <AlertCircle size={20} className="text-white/10 mx-auto" />
+                            )}
+                          </motion.div>
                         </td>
                       );
                     })}
                     <td className="p-8 text-right">
-                      <span className={`text-[9px] font-sans font-black uppercase tracking-widest ${userFiles.length >= 3 ? 'text-green-500' : 'text-[#A52A2A]'}`}>
+                      <span className={`text-[9px] font-sans font-black uppercase tracking-widest ${userFiles.length >= 3 ? 'text-green-500' : ''}`} style={{ color: userFiles.length >= 3 ? undefined : colors.accent }}>
                         {userFiles.length} / 3 Found
                       </span>
                     </td>
-                  </tr>
+                  </motion.tr>
                 );
               })}
             </tbody>
           </table>
-        </div>
+        </motion.div>
       </div>
     </main>
   );

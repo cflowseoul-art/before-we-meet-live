@@ -1,10 +1,13 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
+import { motion } from "framer-motion";
 import { supabase } from "@/lib/supabase";
 import { usePhaseRedirect } from "@/lib/hooks/usePhaseRedirect";
-import { MatchingCard } from "../../_components/MatchingCard";
 import { Sparkles, Activity, Search, Heart, ShieldCheck, AlertCircle, RefreshCcw, Quote } from "lucide-react";
+import { DESIGN_TOKENS } from "@/lib/design-tokens";
+
+const { colors, borderRadius, transitions } = DESIGN_TOKENS;
 
 export default function UserReportPage({ params }: { params: any }) {
   const [user, setUser] = useState<any>(null);
@@ -19,10 +22,10 @@ export default function UserReportPage({ params }: { params: any }) {
   const [loadingStep, setLoadingStep] = useState(0);
 
   const loadingMessages = [
-    { icon: <Search size={20}/>, text: "경매 데이터를 정밀 분석 중..." },
-    { icon: <Heart size={20}/>, text: "피드 시그널 교차 검증 중..." },
-    { icon: <Activity size={20}/>, text: "7:3 가중치 알고리즘 적용 중..." },
-    { icon: <ShieldCheck size={20}/>, text: "맞춤형 리포트 생성 완료..." }
+    { icon: <Search size={20} />, text: "경매 데이터를 정밀 분석 중..." },
+    { icon: <Heart size={20} />, text: "피드 시그널 교차 검증 중..." },
+    { icon: <Activity size={20} />, text: "7:3 가중치 알고리즘 적용 중..." },
+    { icon: <ShieldCheck size={20} />, text: "맞춤형 리포트 생성 완료..." }
   ];
 
   const calculateMatches = useCallback(async (uid: string) => {
@@ -33,7 +36,6 @@ export default function UserReportPage({ params }: { params: any }) {
       setIsLoading(true);
       setError(null);
 
-      // 시각적 로딩 단계
       for (let i = 0; i < loadingMessages.length; i++) {
         setLoadingStep(i);
         await new Promise(resolve => setTimeout(resolve, 800));
@@ -46,7 +48,7 @@ export default function UserReportPage({ params }: { params: any }) {
       ]);
 
       if (usersRes.error) throw new Error("데이터 연결 실패");
-      
+
       const allUsers = usersRes.data || [];
       const allBids = bidsRes.data || [];
       const allLikes = likesRes.data || [];
@@ -67,14 +69,12 @@ export default function UserReportPage({ params }: { params: any }) {
         .map(other => {
           let auctionScore = 0;
           const otherBids = allBids.filter(b => String(b.user_id) === String(other.id));
-          
-          // [1] 가치관 점수 (70점 만점)
+
           if (myBids.length > 0) {
             let matchRatioSum = 0;
             myBids.forEach(myBid => {
               const partnerBid = otherBids.find(ob => ob.item_id === myBid.item_id);
               if (partnerBid) {
-                // 입찰 금액 차이에 기반한 유사도 환산
                 const ratio = Math.min(myBid.amount, partnerBid.amount) / Math.max(myBid.amount, partnerBid.amount);
                 matchRatioSum += ratio;
               }
@@ -82,23 +82,21 @@ export default function UserReportPage({ params }: { params: any }) {
             auctionScore = (matchRatioSum / myBids.length) * 70;
           }
 
-          // [2] 피드 점수 (30점 만점)
           const heartsCount = myLikes.filter(l => String(l.target_user_id) === String(other.id)).length;
           const feedScore = (Math.min(heartsCount, 3) / 3) * 30;
 
-          // [3] 최종 합산 및 상호 호감 시너지
           const receivedLike = allLikes.some(l => String(l.user_id) === String(other.id) && String(l.target_user_id) === String(uid));
           let finalScore = auctionScore + feedScore;
-          
+
           const isMutual = heartsCount > 0 && receivedLike;
-          if (isMutual) finalScore *= 1.2; // 20% 보너스
+          if (isMutual) finalScore *= 1.2;
 
           return {
             id: other.id,
             nickname: other.nickname,
             final_score: Math.round(Math.min(finalScore, 100)),
-            auctionScore: Math.round(auctionScore), // UI 바 표시용
-            feedScore: Math.round(feedScore),      // UI 바 표시용
+            auctionScore: Math.round(auctionScore),
+            feedScore: Math.round(feedScore),
             isMutual: isMutual
           };
         })
@@ -116,7 +114,6 @@ export default function UserReportPage({ params }: { params: any }) {
     }
   }, []);
 
-  // Next.js 13+ params 대응
   useEffect(() => {
     if (params) {
       params.then((p: any) => setUserId(p.id));
@@ -125,7 +122,7 @@ export default function UserReportPage({ params }: { params: any }) {
 
   usePhaseRedirect({
     currentPage: "report",
-    onSettingsFetched: (settings) => {
+    onSettingsFetched: () => {
       if (userId && matches.length === 0 && !isCalculating.current && !hasFinished.current) {
         calculateMatches(userId);
       }
@@ -135,82 +132,146 @@ export default function UserReportPage({ params }: { params: any }) {
   if (isLoading) return <LoadingScreen step={loadingStep} messages={loadingMessages} />;
 
   if (error) return (
-    <div className="min-h-screen bg-[#0A0A0A] flex flex-col items-center justify-center p-8 text-center space-y-6">
-      <AlertCircle className="text-[#A52A2A]" size={48} />
+    <motion.div
+      className="min-h-screen flex flex-col items-center justify-center p-8 text-center space-y-6"
+      style={{ backgroundColor: colors.primary }}
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+    >
+      <motion.div
+        initial={{ scale: 0 }}
+        animate={{ scale: 1 }}
+        transition={{ type: "spring" }}
+      >
+        <AlertCircle style={{ color: colors.accent }} size={48} />
+      </motion.div>
       <h2 className="text-xl text-white italic font-serif">{error}</h2>
-      <button onClick={() => window.location.reload()} className="px-6 py-3 bg-white/10 text-white rounded-full text-xs font-black uppercase tracking-widest flex items-center gap-2">
+      <motion.button
+        onClick={() => window.location.reload()}
+        className="px-6 py-3 bg-white/10 text-white rounded-full text-xs font-black uppercase tracking-widest flex items-center gap-2"
+        whileHover={{ scale: 1.05 }}
+        whileTap={{ scale: 0.95 }}
+      >
         <RefreshCcw size={14} /> Retry Analysis
-      </button>
-    </div>
+      </motion.button>
+    </motion.div>
   );
 
   return (
-    <div className="min-h-screen bg-[#FDFDFD] text-[#1A1A1A] font-serif pb-24 antialiased select-none">
-      <header className="text-center pt-16 pb-12 px-6">
-        <p className="text-[10px] font-sans font-black tracking-[0.4em] text-[#A52A2A] uppercase mb-3">Matching Intelligence</p>
+    <div
+      className="min-h-screen font-serif pb-24 antialiased select-none"
+      style={{ backgroundColor: colors.background, color: colors.primary }}
+    >
+      <motion.header
+        className="text-center pt-16 pb-12 px-6"
+        initial={{ opacity: 0, y: -20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.6 }}
+      >
+        <p className="text-[10px] font-sans font-black tracking-[0.4em] uppercase mb-3" style={{ color: colors.accent }}>Matching Intelligence</p>
         <h1 className="text-4xl italic tracking-tighter leading-tight mb-2">{user?.nickname}님의 인연 리포트</h1>
-        <div className="h-px w-12 bg-[#A52A2A] mx-auto opacity-30" />
-      </header>
+        <motion.div
+          className="h-px w-12 mx-auto opacity-30"
+          style={{ backgroundColor: colors.accent }}
+          initial={{ scaleX: 0 }}
+          animate={{ scaleX: 1 }}
+          transition={{ delay: 0.3, duration: 0.5 }}
+        />
+      </motion.header>
 
       <section className="max-w-xl mx-auto px-6 space-y-12">
-        <div className="bg-white p-10 rounded-[3rem] border border-[#EEEBDE] shadow-sm relative overflow-hidden">
-          <Quote className="absolute -top-2 -left-2 text-[#EEEBDE] opacity-50" size={80} />
+        <motion.div
+          className="bg-white p-10 border shadow-sm relative overflow-hidden"
+          style={{ borderRadius: borderRadius.onboarding, borderColor: colors.soft }}
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.2, duration: 0.5 }}
+        >
+          <Quote className="absolute -top-2 -left-2 opacity-50" style={{ color: colors.soft }} size={80} />
           <div className="relative z-10 text-center space-y-4">
             <p className="text-sm leading-[1.8] text-gray-500 font-light break-keep">
-              가치관 경매의 데이터와 사진 피드의 호감도를 교차 분석한 결과, <br/>
-              {user?.nickname}님과 가장 깊은 공명을 보인 <span className="text-[#A52A2A] font-bold underline">{targetGender}</span> 세 분을 찾았습니다.
+              가치관 경매의 데이터와 사진 피드의 호감도를 교차 분석한 결과, <br />
+              {user?.nickname}님과 가장 깊은 공명을 보인 <span className="font-bold underline" style={{ color: colors.accent }}>{targetGender}</span> 세 분을 찾았습니다.
             </p>
           </div>
-        </div>
+        </motion.div>
 
         <div className="space-y-10">
-          <h3 className="text-[10px] font-sans font-black tracking-[0.3em] text-gray-300 uppercase text-center italic">Top 3 Destined Connections</h3>
-          
+          <h3 className="text-[10px] font-sans font-black tracking-[0.3em] uppercase text-center italic" style={{ color: colors.muted }}>Top 3 Destined Connections</h3>
+
           {matches.map((match, idx) => (
-            <div key={match.id} className="relative group">
-              <div className="bg-white rounded-[2.5rem] border border-[#EEEBDE] shadow-xl overflow-hidden transition-all hover:translate-y-[-4px]">
+            <motion.div
+              key={match.id}
+              className="relative group"
+              initial={{ opacity: 0, y: 30 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.3 + idx * 0.15, duration: 0.5 }}
+            >
+              <motion.div
+                className="bg-white overflow-hidden transition-all"
+                style={{ borderRadius: "2.5rem", border: `1px solid ${colors.soft}`, boxShadow: "0 25px 50px -12px rgba(0, 0, 0, 0.05)" }}
+                whileHover={{ y: -4, boxShadow: "0 25px 50px -12px rgba(0, 0, 0, 0.1)" }}
+              >
                 <div className="p-8 space-y-6">
                   <div className="flex justify-between items-end">
                     <div>
-                      <span className="text-[10px] font-sans font-black text-[#A52A2A] uppercase tracking-widest">Rank {idx + 1}</span>
+                      <span className="text-[10px] font-sans font-black uppercase tracking-widest" style={{ color: colors.accent }}>Rank {idx + 1}</span>
                       <h4 className="text-3xl font-bold mt-1 tracking-tighter">{match.nickname}</h4>
                     </div>
                     <div className="text-right">
-                      <p className="text-[10px] text-gray-300 font-sans font-black uppercase tracking-widest">Total Match</p>
-                      <p className="text-4xl font-black italic text-[#A52A2A]">{match.final_score}%</p>
+                      <p className="text-[10px] font-sans font-black uppercase tracking-widest" style={{ color: colors.muted }}>Total Match</p>
+                      <p className="text-4xl font-black italic" style={{ color: colors.accent }}>{match.final_score}%</p>
                     </div>
                   </div>
 
                   <div className="space-y-4 pt-4 border-t border-gray-50">
                     <div className="space-y-1.5">
-                      <div className="flex justify-between text-[10px] font-sans font-bold uppercase tracking-wider text-gray-400">
+                      <div className="flex justify-between text-[10px] font-sans font-bold uppercase tracking-wider" style={{ color: colors.muted }}>
                         <span>Values Fit (Auction)</span>
                         <span>{match.auctionScore}/70</span>
                       </div>
                       <div className="h-1.5 w-full bg-gray-50 rounded-full overflow-hidden">
-                        <div className="h-full bg-[#1A1A1A] transition-all duration-1000" style={{ width: `${(match.auctionScore / 70) * 100}%` }} />
+                        <motion.div
+                          className="h-full"
+                          style={{ backgroundColor: colors.primary }}
+                          initial={{ width: 0 }}
+                          animate={{ width: `${(match.auctionScore / 70) * 100}%` }}
+                          transition={{ delay: 0.5 + idx * 0.15, duration: 0.8, ease: transitions.default.ease }}
+                        />
                       </div>
                     </div>
                     <div className="space-y-1.5">
-                      <div className="flex justify-between text-[10px] font-sans font-bold uppercase tracking-wider text-gray-400">
+                      <div className="flex justify-between text-[10px] font-sans font-bold uppercase tracking-wider" style={{ color: colors.muted }}>
                         <span>Visual Harmony (Feed)</span>
                         <span>{match.feedScore}/30</span>
                       </div>
                       <div className="h-1.5 w-full bg-gray-50 rounded-full overflow-hidden">
-                        <div className="h-full bg-[#A52A2A] transition-all duration-1000" style={{ width: `${(match.feedScore / 30) * 100}%` }} />
+                        <motion.div
+                          className="h-full"
+                          style={{ backgroundColor: colors.accent }}
+                          initial={{ width: 0 }}
+                          animate={{ width: `${(match.feedScore / 30) * 100}%` }}
+                          transition={{ delay: 0.6 + idx * 0.15, duration: 0.8, ease: transitions.default.ease }}
+                        />
                       </div>
                     </div>
                   </div>
 
                   {match.isMutual && (
-                    <div className="bg-[#FDF8F8] py-2 rounded-xl flex items-center justify-center gap-2 border border-[#A52A2A]/10">
-                      <Heart size={12} fill="#A52A2A" className="text-[#A52A2A]" />
-                      <span className="text-[9px] font-sans font-black text-[#A52A2A] uppercase tracking-widest">Mutual Signal Detected</span>
-                    </div>
+                    <motion.div
+                      className="py-2 rounded-xl flex items-center justify-center gap-2 border"
+                      style={{ backgroundColor: `${colors.accent}08`, borderColor: `${colors.accent}15` }}
+                      initial={{ opacity: 0, scale: 0.9 }}
+                      animate={{ opacity: 1, scale: 1 }}
+                      transition={{ delay: 0.7 + idx * 0.15 }}
+                    >
+                      <Heart size={12} fill={colors.accent} style={{ color: colors.accent }} />
+                      <span className="text-[9px] font-sans font-black uppercase tracking-widest" style={{ color: colors.accent }}>Mutual Signal Detected</span>
+                    </motion.div>
                   )}
                 </div>
-              </div>
-            </div>
+              </motion.div>
+            </motion.div>
           ))}
         </div>
       </section>
@@ -220,20 +281,48 @@ export default function UserReportPage({ params }: { params: any }) {
 
 function LoadingScreen({ step, messages }: any) {
   return (
-    <div className="min-h-screen bg-[#0A0A0A] flex flex-col items-center justify-center p-8 text-center space-y-12">
+    <motion.div
+      className="min-h-screen flex flex-col items-center justify-center p-8 text-center space-y-12"
+      style={{ backgroundColor: colors.primary }}
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+    >
       <div className="relative w-24 h-24">
-        <div className="absolute inset-0 border-2 border-[#A52A2A]/20 rounded-full animate-ping" />
-        <div className="absolute inset-0 border-t-2 border-[#A52A2A] rounded-full animate-spin flex items-center justify-center">
-          <Sparkles className="text-[#A52A2A] animate-pulse" size={32} />
-        </div>
+        <motion.div
+          className="absolute inset-0 border-2 rounded-full"
+          style={{ borderColor: `${colors.accent}20` }}
+          animate={{ scale: [1, 1.5, 1], opacity: [0.5, 0, 0.5] }}
+          transition={{ repeat: Infinity, duration: 2 }}
+        />
+        <motion.div
+          className="absolute inset-0 border-t-2 rounded-full flex items-center justify-center"
+          style={{ borderColor: colors.accent }}
+          animate={{ rotate: 360 }}
+          transition={{ repeat: Infinity, duration: 1, ease: "linear" }}
+        >
+          <Sparkles style={{ color: colors.accent }} size={32} />
+        </motion.div>
       </div>
       <div className="space-y-4">
-        <div className="flex items-center justify-center gap-2 text-[#A52A2A]">
+        <motion.div
+          className="flex items-center justify-center gap-2"
+          style={{ color: colors.accent }}
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+        >
           {messages[step].icon}
           <span className="text-[10px] font-sans font-black uppercase tracking-[0.4em]">Phase {step + 1}</span>
-        </div>
-        <h2 className="text-xl text-white italic font-serif leading-relaxed h-8">{messages[step].text}</h2>
+        </motion.div>
+        <motion.h2
+          key={step}
+          className="text-xl text-white italic font-serif leading-relaxed h-8"
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.4 }}
+        >
+          {messages[step].text}
+        </motion.h2>
       </div>
-    </div>
+    </motion.div>
   );
 }
