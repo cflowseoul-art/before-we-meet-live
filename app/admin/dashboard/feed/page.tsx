@@ -4,8 +4,8 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { supabase } from "@/lib/supabase";
 import { useRouter } from "next/navigation";
 import { 
-  Heart, Trophy, Users, TrendingUp, Sparkles, 
-  Loader2, ChevronLeft, Settings 
+  Heart, Trophy, Users, Sparkles, 
+  Loader2, ChevronLeft, Settings, AlertCircle 
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { parseDriveFileName } from "@/lib/utils/feed-parser";
@@ -17,9 +17,9 @@ const { colors } = DESIGN_TOKENS;
 const PASTEL_THEME = {
   blue: "#E0F2FE",      // 파스텔 블루 배경
   darkBlue: "#7DD3FC",  // 포인트 블루
-  softBeige: "#F5F5F4", // 소프트 베이지 (디자인 토큰 보완)
-  border: "#EEEBDE",    // 기존 테두리 컬러 유지
-  text: "#44403C"       // 부드러운 차콜 텍스트
+  softBeige: "#F5F5F4", // 소프트 베이지
+  border: "#EEEBDE",    // 테두리
+  text: "#44403C"       // 차콜 텍스트
 };
 
 interface FeedItem {
@@ -41,6 +41,7 @@ export default function FeedDashboard() {
 
   const sessionRef = useRef(currentSession);
 
+  // 성별 판단 헬퍼 함수
   const isFemaleGender = (gender: string) => {
     const g = gender?.toUpperCase?.() || "";
     return g === "F" || g === "FEMALE" || g === "여" || g === "여성";
@@ -56,12 +57,10 @@ export default function FeedDashboard() {
       ? feedItems.filter(item => isFemaleGender(item.gender))
       : feedItems.filter(item => isMaleGender(item.gender));
 
-  const femaleItems = feedItems.filter(item => isFemaleGender(item.gender));
-  const maleItems = feedItems.filter(item => isMaleGender(item.gender));
-
   const API_KEY = process.env.NEXT_PUBLIC_GOOGLE_DRIVE_API_KEY;
   const FOLDER_ID = process.env.NEXT_PUBLIC_GOOGLE_DRIVE_FOLDER_ID;
 
+  // 데이터 페칭 로직
   const fetchFeedData = useCallback(async (session: string) => {
     if (!FOLDER_ID || !API_KEY) return;
     try {
@@ -114,6 +113,7 @@ export default function FeedDashboard() {
     }
   }, [API_KEY, FOLDER_ID]);
 
+  // 초기 로드 및 실시간 구독
   useEffect(() => {
     const init = async () => {
       const { data } = await supabase.from("system_settings").select("value").eq("key", "current_session").single();
@@ -134,35 +134,55 @@ export default function FeedDashboard() {
     return () => { supabase.removeChannel(channel); };
   }, [fetchFeedData]);
 
+  // [중요] 리포트 발행 및 페이지 이동 로직
   const finalizeAndReleaseReport = async () => {
-    const isConfirm = confirm("📢 모든 매칭을 계산하고 리포트를 발행하시겠습니까?");
+    const isConfirm = confirm("📢 모든 매칭을 계산하고 리포트를 발행하시겠습니까?\n발행 후 결과 확인 페이지로 이동합니다.");
     if (!isConfirm) return;
+    
     setIsFinalizing(true);
     try {
+      // 1. 매칭 알고리즘 실행 및 DB 저장 API 호출
       const response = await fetch('/api/admin/finalize-matches', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ sessionId: currentSession })
       });
+      
       const result = await response.json();
-      if (!result.success) throw new Error(result.error || 'Failed');
+      
+      // DB 컬럼 오류 등이 발생했을 때 처리
+      if (!result.success) {
+        throw new Error(result.error || '매칭 처리 중 오류가 발생했습니다.');
+      }
+
+      // 2. 유저용 리포트 공개 설정
       await supabase.from("system_settings").update({ value: "true" }).eq("key", "is_report_open");
-      alert(`✅ 리포트 발행 완료!`);
+
+      alert(`✅ 리포트 발행 및 매칭이 성공적으로 완료되었습니다!`);
+      
+      // 3. 결과 대시보드로 이동
+      router.push("/admin/dashboard/1on1"); 
+      
     } catch (err: any) {
-      alert("오류 발생: " + err.message);
+      console.error("Finalize Error:", err);
+      alert("오류 발생: " + err.message + "\n(DB 컬럼 설정을 다시 확인해주세요.)");
     } finally {
       setIsFinalizing(false);
     }
   };
 
   if (isLoading) {
-    return <main className="h-screen w-full bg-[#FAF9F6] flex items-center justify-center"><Loader2 className="text-[#7DD3FC] animate-spin" /></main>;
+    return (
+      <main className="h-screen w-full bg-[#FAF9F6] flex items-center justify-center">
+        <Loader2 className="text-[#7DD3FC] animate-spin" size={30} />
+      </main>
+    );
   }
 
   return (
     <main className="min-h-screen w-full bg-[#FAF9F6] text-[#44403C] antialiased flex flex-col font-serif pb-20 overflow-x-hidden">
       
-      {/* 1. Header Navigation */}
+      {/* Navigation */}
       <nav className="h-[70px] border-b border-[#EEEBDE] px-6 md:px-10 flex justify-between items-center bg-white sticky top-0 z-50">
         <div className="flex items-center gap-4">
           <div className="flex items-center gap-2 cursor-pointer group" onClick={() => router.push("/admin")}>
@@ -187,7 +207,7 @@ export default function FeedDashboard() {
 
       <div className="max-w-7xl mx-auto w-full px-6 pt-10">
         
-        {/* 2. Stats Section */}
+        {/* Stats Section */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-12 font-sans">
           {[
             { label: "Total Photos", value: feedItems.length, icon: Users, color: "#44403C" },
@@ -206,7 +226,7 @@ export default function FeedDashboard() {
           ))}
         </div>
 
-        {/* 3. Ranking List */}
+        {/* Ranking List */}
         <div className="bg-white rounded-[2.5rem] p-8 md:p-12 border border-[#EEEBDE] shadow-sm mb-10">
           
           <div className="flex flex-col md:flex-row justify-between items-center gap-6 mb-12">
@@ -254,7 +274,6 @@ export default function FeedDashboard() {
                       {idx + 1}
                     </div>
 
-                    {/* Image Card - 닉네임 정보 제거 */}
                     <div className="aspect-[3/4] w-full bg-[#FAF9F6] rounded-[2rem] overflow-hidden border border-[#EEEBDE] relative shadow-sm group-hover:shadow-md transition-all duration-500">
                       <img 
                         src={item.photo_url} 
@@ -269,7 +288,7 @@ export default function FeedDashboard() {
                         {isFemale ? 'FEMALE' : 'MALE'}
                       </div>
 
-                      {/* Info Overlay - 닉네임 삭제 */}
+                      {/* Info Overlay */}
                       <div className="absolute bottom-0 left-0 right-0 p-5 bg-gradient-to-t from-white/90 via-white/40 to-transparent">
                         <div className="flex items-center justify-end gap-2">
                           <div className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full shadow-sm font-sans bg-white/80 border border-[#EEEBDE] ${
