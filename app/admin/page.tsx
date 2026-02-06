@@ -2,8 +2,8 @@
 
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { motion } from "framer-motion";
-import { LayoutDashboard, Settings, LogOut, Lock, ImageIcon } from "lucide-react";
+import { motion, AnimatePresence } from "framer-motion";
+import { LayoutDashboard, Settings, LogOut, Lock, ImageIcon, Sparkles, Loader2, CheckCircle, AlertCircle, Heart, Eye } from "lucide-react";
 import { DESIGN_TOKENS } from "@/lib/design-tokens";
 
 const { colors, borderRadius, transitions } = DESIGN_TOKENS;
@@ -12,6 +12,10 @@ export default function AdminGate() {
   const router = useRouter();
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [passwordInput, setPasswordInput] = useState("");
+
+  // 매칭 확정 관련 상태
+  const [isFinalizing, setIsFinalizing] = useState(false);
+  const [finalizeResult, setFinalizeResult] = useState<{ success: boolean; message: string } | null>(null);
 
   useEffect(() => {
     const auth = sessionStorage.getItem("admin_auth");
@@ -25,6 +29,49 @@ export default function AdminGate() {
       sessionStorage.setItem("admin_auth", "true");
     } else {
       alert("Passcode Incorrect");
+    }
+  };
+
+  // 최종 매칭 확정 API 호출
+  const handleFinalizeMatches = async () => {
+    if (isFinalizing) return;
+
+    const confirmed = confirm(
+      "최종 매칭을 확정하시겠습니까?\n\n이 작업은 기존 매칭 데이터를 삭제하고 새로운 매칭 결과를 생성합니다."
+    );
+
+    if (!confirmed) return;
+
+    setIsFinalizing(true);
+    setFinalizeResult(null);
+
+    try {
+      const res = await fetch('/api/admin/finalize-matches', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessionId: '01' })
+      });
+
+      const data = await res.json();
+
+      if (data.success) {
+        setFinalizeResult({
+          success: true,
+          message: `매칭 완료! ${data.matches_created}개의 매칭이 생성되었습니다.`
+        });
+      } else {
+        setFinalizeResult({
+          success: false,
+          message: data.error || '매칭 생성 중 오류가 발생했습니다.'
+        });
+      }
+    } catch (err: any) {
+      setFinalizeResult({
+        success: false,
+        message: err.message || '서버 연결 오류'
+      });
+    } finally {
+      setIsFinalizing(false);
     }
   };
 
@@ -166,12 +213,95 @@ export default function AdminGate() {
           ))}
         </nav>
 
+        {/* 최종 매칭 확정 버튼 */}
+        <motion.div
+          className="pt-8"
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.6 }}
+        >
+          <motion.button
+            onClick={handleFinalizeMatches}
+            disabled={isFinalizing}
+            className="w-full p-6 border-2 border-dashed border-emerald-500/30 rounded-[2rem] bg-emerald-500/10 hover:bg-emerald-500/20 hover:border-emerald-500/50 transition-all flex items-center justify-center gap-4 group disabled:opacity-50 disabled:cursor-not-allowed"
+            whileHover={!isFinalizing ? { scale: 1.02 } : {}}
+            whileTap={!isFinalizing ? { scale: 0.98 } : {}}
+          >
+            {isFinalizing ? (
+              <>
+                <Loader2 size={24} className="text-emerald-400 animate-spin" />
+                <div className="text-left">
+                  <p className="text-lg font-bold text-emerald-400">매칭 계산 중...</p>
+                  <p className="text-[9px] opacity-60 uppercase tracking-widest font-sans mt-0.5 text-emerald-300">Gale-Shapley Algorithm Running</p>
+                </div>
+              </>
+            ) : (
+              <>
+                <motion.div
+                  className="w-12 h-12 rounded-2xl flex items-center justify-center bg-emerald-500/20"
+                  whileHover={{ scale: 1.1, rotate: 15 }}
+                >
+                  <Sparkles size={24} className="text-emerald-400" />
+                </motion.div>
+                <div className="text-left">
+                  <p className="text-lg font-bold text-emerald-400">최종 매칭 확정</p>
+                  <p className="text-[9px] opacity-60 uppercase tracking-widest font-sans mt-0.5 text-emerald-300">Generate Final Match Results</p>
+                </div>
+              </>
+            )}
+          </motion.button>
+
+          {/* 결과 메시지 */}
+          <AnimatePresence>
+            {finalizeResult && (
+              <motion.div
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -10 }}
+                className={`mt-4 p-4 rounded-2xl flex items-center gap-3 ${
+                  finalizeResult.success
+                    ? 'bg-emerald-500/20 border border-emerald-500/30'
+                    : 'bg-red-500/20 border border-red-500/30'
+                }`}
+              >
+                {finalizeResult.success ? (
+                  <CheckCircle size={20} className="text-emerald-400" />
+                ) : (
+                  <AlertCircle size={20} className="text-red-400" />
+                )}
+                <span className={`text-sm ${finalizeResult.success ? 'text-emerald-300' : 'text-red-300'}`}>
+                  {finalizeResult.message}
+                </span>
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+          {/* 매칭 결과 보기 버튼 */}
+          <motion.button
+            onClick={() => router.push('/admin/dashboard/1on1/results')}
+            className="w-full mt-4 p-5 border border-pink-500/30 rounded-[2rem] bg-pink-500/10 hover:bg-pink-500/20 hover:border-pink-500/50 transition-all flex items-center justify-center gap-4 group"
+            whileHover={{ scale: 1.02 }}
+            whileTap={{ scale: 0.98 }}
+          >
+            <motion.div
+              className="w-10 h-10 rounded-xl flex items-center justify-center bg-pink-500/20"
+              whileHover={{ scale: 1.1 }}
+            >
+              <Eye size={20} className="text-pink-400" />
+            </motion.div>
+            <div className="text-left">
+              <p className="text-base font-bold text-pink-400">매칭 결과 보기</p>
+              <p className="text-[9px] opacity-60 uppercase tracking-widest font-sans mt-0.5 text-pink-300">View Match Results & MC Guide</p>
+            </div>
+          </motion.button>
+        </motion.div>
+
         <motion.button
           onClick={() => { sessionStorage.removeItem("admin_auth"); window.location.href = "/"; }}
           className="pt-10 text-[10px] text-white/20 hover:text-white uppercase tracking-[0.3em] font-sans font-bold flex items-center justify-center gap-2 mx-auto transition-colors"
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
-          transition={{ delay: 0.6 }}
+          transition={{ delay: 0.7 }}
           whileHover={{ scale: 1.05 }}
         >
           <LogOut size={12} /> Exit Admin Session

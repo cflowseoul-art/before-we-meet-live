@@ -73,7 +73,7 @@ export default function UserReportPage({ params }: { params: any }) {
           if (myBids.length > 0) {
             let matchRatioSum = 0;
             myBids.forEach(myBid => {
-              const partnerBid = otherBids.find(ob => ob.item_id === myBid.item_id);
+              const partnerBid = otherBids.find(ob => ob.auction_item_id === myBid.auction_item_id);
               if (partnerBid) {
                 const ratio = Math.min(myBid.amount, partnerBid.amount) / Math.max(myBid.amount, partnerBid.amount);
                 matchRatioSum += ratio;

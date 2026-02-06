@@ -221,10 +221,14 @@ export default function Admin1on1Dashboard() {
         </div>
 
         <div className="flex items-center gap-2">
-          <div className="flex items-center gap-1.5 bg-sky-50 border border-sky-200 px-4 py-2 rounded-full">
+          {/* Clickable Match Count - navigates to results */}
+          <button
+            onClick={() => router.push("/admin/dashboard/1on1/results")}
+            className="flex items-center gap-1.5 bg-sky-50 border border-sky-200 px-4 py-2 rounded-full hover:bg-sky-100 hover:border-sky-300 transition-all cursor-pointer"
+          >
             <Users size={14} className="text-sky-500" />
             <span className="text-[10px] font-black uppercase font-sans tracking-widest text-sky-600">{matchCount} Matched</span>
-          </div>
+          </button>
           <button onClick={() => router.push("/admin/settings")} className="p-2.5 rounded-full border border-sky-100 hover:bg-sky-50 transition-all">
             <Settings size={18} className="text-sky-400" />
           </button>

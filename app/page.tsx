@@ -111,7 +111,7 @@ export default function Onboarding() {
         className="relative z-20 text-center"
       >
         <h1 className="text-white text-4xl font-serif italic tracking-wider drop-shadow-md">
-          Me Before You
+          Before We Meet
         </h1>
         <p className="text-white/70 text-[10px] tracking-[0.4em] mt-2 uppercase">
           A Journey of Love
@@ -129,7 +129,7 @@ export default function Onboarding() {
         className="max-w-md w-full bg-white rounded-[3rem] p-10 border border-[#EEEBDE] shadow-xl relative z-10"
       >
         <header className="text-center mb-12">
-          <h1 className="text-3xl font-serif italic mb-2">Me Before You</h1>
+          <h1 className="text-3xl font-serif italic mb-2">Before We Meet</h1>
           <p className="text-[9px] font-serif italic uppercase tracking-[0.3em] text-[#A52A2A]">Identity Collection</p>
         </header>
 
