@@ -11,6 +11,26 @@ import {
   Heart, Crown, MessageCircle, TrendingUp, Share2, Check, Download, Link, X
 } from "lucide-react";
 
+// ─── 다중 태그 매핑 (Subconscious Frequency 전용) ───
+const VALUE_TO_TAGS: Record<string, string[]> = {
+  "원하는 것을 살 수 있는 풍요": ["풍요", "성취"],
+  "사랑하는 사람과 함께하는 시간": ["사랑", "관계"],
+  "지금 당장 누리는 확실한 행복": ["현재", "감각"],
+  "더 큰 미래를 위한 인내": ["미래", "의지"],
+  "안정적이고 평온한 일상": ["안정", "평화"],
+  "새로운 경험과 짜릿한 도전": ["도전", "열정"],
+  "모두에게 인정받는 성공": ["성공", "인정"],
+  "나만의 속도로 걷는 여유": ["여유", "자율"],
+  "냉철하고 합리적인 판단": ["이성", "논리"],
+  "깊이 공감하는 따뜻한 마음": ["공감", "감성"],
+  "눈에 보이는 압도적 성과": ["성과", "실행"],
+  "함께 걷는 과정의 유대감": ["과정", "유대"],
+  "누구와도 차별화된 나만의 개성": ["개성", "독립"],
+  "모두와 어우러지는 소속감": ["소속", "조화"],
+  "오롯이 나에게 집중하는 자유": ["자유", "독립"],
+  "소중한 사람을 위한 헌신": ["헌신", "관계"],
+};
+
 // ─── 가치관 키워드 매핑 ───
 const VALUE_TO_KEYWORD: Record<string, string> = {
   "원하는 것을 살 수 있는 풍요": "풍요",
@@ -258,33 +278,32 @@ export default function FinalReportPage({ params }: { params: any }) {
       (WARM_VALUES.includes(selfIdentity) && COOL_CHARMS.includes(perceivedCharm))
     );
 
-    // ─── Section 5: Instinct - 내가 좋아한 사람들의 가치관 분석 ───
+    // ─── Section 5: Instinct - 내가 좋아한 사람들의 가치관 분석 (가중 합산 + 다중 태그) ───
     const myLikes = allFeedLikes.filter(l => String(l.user_id) === String(uid));
     const likedUserIds = [...new Set(myLikes.map(l => String(l.target_user_id)))];
 
-    // 좋아한 사람들의 top value 집계
-    const likedValueCount = new Map<string, number>();
+    const scoreMap = new Map<string, number>();
     likedUserIds.forEach(likedUid => {
       const theirBids = allBids.filter(b => String(b.user_id) === likedUid);
-      const theirBidMap = new Map<string, number>();
+      const totalSpentByLiked = theirBids.reduce((s, b) => s + (b.amount || 0), 0);
+      if (totalSpentByLiked === 0) return;
+
       theirBids.forEach(b => {
         const item = items.find(i => i.id === b.auction_item_id);
         const name = item?.title || "";
-        if (name) theirBidMap.set(name, (theirBidMap.get(name) || 0) + (b.amount || 0));
+        const tags = VALUE_TO_TAGS[name];
+        if (!tags) return;
+
+        const weight = (b.amount || 0) / totalSpentByLiked;
+        tags.forEach((tag, idx) => {
+          const tagWeight = idx === 0 ? 1.0 : 0.5;
+          const score = weight * tagWeight;
+          scoreMap.set(tag, (scoreMap.get(tag) || 0) + score);
+        });
       });
-      // top value
-      let topItem = "";
-      let topAmount = 0;
-      theirBidMap.forEach((amount, name) => {
-        if (amount > topAmount) { topAmount = amount; topItem = name; }
-      });
-      if (topItem) {
-        const kw = VALUE_TO_KEYWORD[topItem] || topItem;
-        likedValueCount.set(kw, (likedValueCount.get(kw) || 0) + 1);
-      }
     });
 
-    const likedUserValues = Array.from(likedValueCount, ([keyword, count]) => ({ keyword, count }))
+    const likedUserValues = Array.from(scoreMap, ([keyword, count]) => ({ keyword, count }))
       .sort((a, b) => b.count - a.count)
       .slice(0, 5);
 

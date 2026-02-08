@@ -119,7 +119,7 @@ export default function Onboarding() {
         phone_suffix: phoneSuffix,
         nickname,
         gender,
-        balance: 1000,
+        balance: 5000,
         session_id: currentSession
       })
       .select().single();

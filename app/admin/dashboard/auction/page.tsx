@@ -109,7 +109,7 @@ export default function AuctionDashboard() {
   };
 
   const handleResetAuction = async () => {
-    if (!confirm("경매를 초기화하시겠습니까?\n- 모든 입찰 내역 삭제\n- 모든 아이템 pending 상태로\n- 참가자 잔액 1000만원으로 복구")) return;
+    if (!confirm("경매를 초기화하시겠습니까?\n- 모든 입찰 내역 삭제\n- 모든 아이템 pending 상태로\n- 참가자 잔액 5000만원으로 복구")) return;
 
     try {
       await supabase.from("bids").delete().neq("id", "00000000-0000-0000-0000-000000000000");
@@ -118,7 +118,7 @@ export default function AuctionDashboard() {
         current_bid: 0,
         highest_bidder_id: null
       }).neq("id", "00000000-0000-0000-0000-000000000000");
-      await supabase.from("users").update({ balance: 1000 }).neq("id", "00000000-0000-0000-0000-000000000000");
+      await supabase.from("users").update({ balance: 5000 }).neq("id", "00000000-0000-0000-0000-000000000000");
 
       alert("경매가 초기화되었습니다.");
       fetchLive();

@@ -123,7 +123,7 @@ export default function AdminSettings() {
   };
 
   const resetAuction = async () => {
-    if (!confirm("경매를 초기화하시겠습니까?\n- 모든 입찰 내역 삭제\n- 모든 아이템 pending 상태로\n- 참가자 잔액 1000만원으로 복구")) return;
+    if (!confirm("경매를 초기화하시겠습니까?\n- 모든 입찰 내역 삭제\n- 모든 아이템 pending 상태로\n- 참가자 잔액 5000만원으로 복구")) return;
 
     setIsAuctionResetLoading(true);
     try {
@@ -133,7 +133,7 @@ export default function AdminSettings() {
         current_bid: 0,
         highest_bidder_id: null
       }).neq("id", "00000000-0000-0000-0000-000000000000");
-      await supabase.from("users").update({ balance: 1000 }).neq("id", "00000000-0000-0000-0000-000000000000");
+      await supabase.from("users").update({ balance: 5000 }).neq("id", "00000000-0000-0000-0000-000000000000");
 
       alert("경매가 초기화되었습니다.");
       fetchSettings();
@@ -375,7 +375,7 @@ export default function AdminSettings() {
         <div className="p-8 flex justify-between items-center shadow-sm" style={{ backgroundColor: "#FEF2F2", border: "1px solid #FECACA", borderRadius: "2.5rem" }}>
           <div>
             <h3 className="text-sm font-sans font-black uppercase tracking-widest mb-1 italic text-red-600">Auction Reset</h3>
-            <p className="text-[10px] font-sans font-medium text-red-400">입찰 내역 삭제, 아이템 초기화, 잔액 1000만원 복구</p>
+            <p className="text-[10px] font-sans font-medium text-red-400">입찰 내역 삭제, 아이템 초기화, 잔액 5000만원 복구</p>
           </div>
           <motion.button
             onClick={resetAuction}
