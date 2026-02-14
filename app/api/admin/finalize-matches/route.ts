@@ -603,6 +603,21 @@ export async function POST(request: Request) {
       });
     });
 
+    // 7.5 점수 대칭화: 같은 쌍(A↔B)은 동일 점수
+    const pairScores = new Map<string, number[]>();
+    matchesToInsert.forEach(m => {
+      const key = [m.user1_id, m.user2_id].sort().join('|');
+      if (!pairScores.has(key)) pairScores.set(key, []);
+      pairScores.get(key)!.push(m.compatibility_score);
+    });
+    matchesToInsert.forEach(m => {
+      const key = [m.user1_id, m.user2_id].sort().join('|');
+      const scores = pairScores.get(key);
+      if (scores && scores.length === 2) {
+        m.compatibility_score = Math.round((scores[0] + scores[1]) / 2);
+      }
+    });
+
     // 8. 매칭 결과 일괄 삽입
     if (matchesToInsert.length > 0) {
       const { error: insertError } = await supabaseAdmin
