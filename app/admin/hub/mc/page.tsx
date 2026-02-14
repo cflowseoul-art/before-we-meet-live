@@ -33,9 +33,9 @@ export default function MCPage() {
 
   const fetchMatches = useCallback(async () => {
     setIsMatchLoading(true);
-    const { data: usersData } = await supabase.from("users").select("*");
+    const { data: usersData } = await supabase.from("users").select("*").eq("session_id", sessionId);
     const usersMap = new Map((usersData || []).map((u: any) => [u.id, u]));
-    const { data: matchesData } = await supabase.from("matches").select("*").order("match_rank", { ascending: true });
+    const { data: matchesData } = await supabase.from("matches").select("*").eq("session_id", sessionId).order("match_rank", { ascending: true });
 
     if (matchesData) {
       const females = (usersData || []).filter((u: any) => ["여성", "여", "F"].includes(u.gender));
@@ -49,7 +49,7 @@ export default function MCPage() {
       setGroupedMatches(grouped);
     }
     setIsMatchLoading(false);
-  }, []);
+  }, [sessionId]);
 
   const handleFinalize = async () => {
     if (!confirm("최종 매칭을 확정하시겠습니까?\n기존 매칭 데이터를 삭제하고 새로운 결과를 생성합니다.")) return;

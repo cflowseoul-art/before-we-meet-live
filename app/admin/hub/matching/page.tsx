@@ -87,11 +87,13 @@ function AuctionTab({ onComplete }: { onComplete: () => void }) {
   const [bids, setBids] = useState<any[]>([]);
   const [isEnding, setIsEnding] = useState(false);
 
+  const sessionId = `${ctx.sessionDate}_${ctx.sessionNum}`;
+
   const fetchLive = useCallback(async () => {
     const [iRes, uRes, bRes] = await Promise.all([
       supabase.from("auction_items").select("*").order("id"),
-      supabase.from("users").select("*"),
-      supabase.from("bids").select("*").order("created_at", { ascending: false }).limit(20),
+      supabase.from("users").select("*").eq("session_id", sessionId),
+      supabase.from("bids").select("*").eq("session_id", sessionId).order("created_at", { ascending: false }).limit(20),
     ]);
     if (iRes.data) {
       const sorted = [...iRes.data].sort((a, b) => {
@@ -109,7 +111,7 @@ function AuctionTab({ onComplete }: { onComplete: () => void }) {
       setUsers(ranked);
     }
     if (bRes.data) setBids(bRes.data);
-  }, []);
+  }, [sessionId]);
 
   const handleStartAuction = async (itemId: number) => {
     const currentActive = items.find((i) => i.status === "active");
@@ -278,8 +280,8 @@ function FeedTab() {
 
     try {
       const [usersRes, likesRes] = await Promise.all([
-        supabase.from("users").select("id, real_name, phone_suffix, gender"),
-        supabase.from("feed_likes").select("*"),
+        supabase.from("users").select("id, real_name, phone_suffix, gender").eq("session_id", session),
+        supabase.from("feed_likes").select("*").eq("session_id", session),
       ]);
 
       let targetFolderId = FOLDER_ID;
@@ -321,7 +323,8 @@ function FeedTab() {
     sessionRef.current = session;
     fetchFeedData(session);
     const ch = supabase.channel(`hub_feed_${Date.now()}`).on("postgres_changes", { event: "*", schema: "public", table: "feed_likes" }, () => fetchFeedData(sessionRef.current)).subscribe();
-    return () => { supabase.removeChannel(ch); };
+    const poll = setInterval(() => fetchFeedData(sessionRef.current), 3000);
+    return () => { supabase.removeChannel(ch); clearInterval(poll); };
   }, [fetchFeedData, ctx.sessionDate, ctx.sessionNum]);
 
   const handleEndFeed = async () => {
@@ -419,10 +422,10 @@ function FeedTab() {
                 <div className="absolute top-2 right-2 px-2 py-0.5 rounded text-[8px] font-bold" style={{ backgroundColor: isFem ? "#EC489960" : "#3B82F660", color: "#fff" }}>
                   {isFem ? "F" : "M"}
                 </div>
-                <div className="absolute bottom-0 inset-x-0 p-3 bg-gradient-to-t from-black/60 to-transparent">
-                  <div className="flex items-center gap-1" style={{ color: isFem ? "#F472B6" : "#60A5FA" }}>
-                    <Heart size={10} fill="currentColor" />
-                    <span className="text-xs font-bold">{item.like_count}</span>
+                <div className="absolute bottom-0 inset-x-0 p-4 bg-gradient-to-t from-black/80 to-transparent">
+                  <div className="flex items-center gap-1.5">
+                    <Heart size={20} fill="#FF3B30" className="text-[#FF3B30]" />
+                    <span className="text-lg font-black text-white drop-shadow-md">{item.like_count}</span>
                   </div>
                 </div>
               </div>

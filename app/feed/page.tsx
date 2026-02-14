@@ -166,11 +166,15 @@ export default function FeedPage() {
       if (currentSession !== raw) {
         setCurrentSession(raw);
       }
-      // 동적 하트 제한 반영
-      if (settings.max_hearts) {
-        const parsed = parseInt(settings.max_hearts, 10);
-        if (!isNaN(parsed) && parsed >= 3) {
-          setMaxHearts(parsed);
+      // 하트 제한: H = round(2.5 × √N), N = 이성 인원수
+      if (settings.session_ratio) {
+        const parts = String(settings.session_ratio).split(":").map(Number);
+        if (parts.length === 2 && parts[0] > 0 && parts[1] > 0) {
+          const stored = localStorage.getItem("auction_user");
+          const g = stored ? String(JSON.parse(stored)?.gender || "").substring(0, 1) : "";
+          const N = g === "남" ? parts[1] : parts[0];
+          const H = Math.round(2.5 * Math.sqrt(N));
+          setMaxHearts(Math.max(H, 3));
         }
       }
     },

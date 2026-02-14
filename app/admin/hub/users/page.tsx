@@ -1,13 +1,15 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { supabase } from "@/lib/supabase";
 import { useAdminSession } from "@/lib/contexts/admin-session-context";
 import { motion, AnimatePresence } from "framer-motion";
 import {
-  Loader2, CheckCircle2, RefreshCw, Gavel, Heart, Sparkles,
-  Trash2, UserPlus, RotateCcw, AlertTriangle, Save
+  Loader2, CheckCircle2, RefreshCw, Gavel, Heart,
+  Trash2, UserPlus, RotateCcw, AlertTriangle, Save, ImageIcon, X,
+  CheckCircle, AlertCircle, FolderOpen
 } from "lucide-react";
+import { parseDriveFileName } from "@/lib/utils/feed-parser";
 import { AUCTION_ITEMS } from "@/app/constants";
 
 const C = {
@@ -25,6 +27,16 @@ const C = {
 export default function UsersPage() {
   const ctx = useAdminSession();
   const sessionId = `${ctx.sessionDate}_${ctx.sessionNum}`;
+  const savedSessionRef = useRef<string>("");
+
+  // 서버에서 로드된 세션 ID 추적
+  useEffect(() => {
+    if (!ctx.isLoading && ctx.sessionDate && ctx.sessionNum) {
+      if (!savedSessionRef.current) {
+        savedSessionRef.current = `${ctx.sessionDate}_${ctx.sessionNum}`;
+      }
+    }
+  }, [ctx.isLoading, ctx.sessionDate, ctx.sessionNum]);
 
   const [users, setUsers] = useState<any[]>([]);
   const [isSessionSaving, setIsSessionSaving] = useState(false);
@@ -51,17 +63,49 @@ export default function UsersPage() {
     fetchUsers();
   }, [fetchUsers]);
 
-  // --- Session Save ---
+  // --- Session Save (신규 회차 초기화 포함) ---
   const handleSaveSession = async () => {
+    const newSessionId = `${ctx.sessionDate}_${ctx.sessionNum}`;
+    const isNewSession = newSessionId !== savedSessionRef.current;
+
+    if (isNewSession && !confirm(
+      `[${newSessionId}] 신규 회차로 세팅합니다.\n\n` +
+      `- Phase → auction 전환\n` +
+      `- 옥션 아이템 초기화\n` +
+      `- 이전 회차 bids/feed 영향 없음\n\n진행하시겠습니까?`
+    )) return;
+
     setIsSessionSaving(true);
     setSessionSaveSuccess(false);
-    const ok = await ctx.saveSession();
-    if (ok) {
+    try {
+      // 1. 세션 저장
+      const ok = await ctx.saveSession();
+      if (!ok) throw new Error("세션 저장 실패");
+
+      if (isNewSession) {
+        // 2. Phase → auction
+        await ctx.changePhase("auction");
+
+        // 3. 옥션 아이템 초기화 (API 경유 - RLS 우회)
+        const res = await fetch("/api/admin/init-auction", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ sessionId: newSessionId }),
+        });
+        const result = await res.json();
+        if (!result.success) throw new Error(result.error);
+      }
+
+      // 저장 성공 → ref 갱신
+      savedSessionRef.current = newSessionId;
       setSessionSaveSuccess(true);
       setTimeout(() => setSessionSaveSuccess(false), 3000);
       await fetchUsers();
+    } catch (err: any) {
+      alert("초기화 오류: " + err.message);
+    } finally {
+      setIsSessionSaving(false);
     }
-    setIsSessionSaving(false);
   };
 
   // --- Phase Change ---
@@ -83,16 +127,18 @@ export default function UsersPage() {
     setIsPhaseLoading(null);
   };
 
-  // --- Values Sync ---
+  // --- Values Sync (현재 세션 입찰만 삭제 후 아이템 재생성) ---
   const syncInventory = async () => {
-    if (!confirm(`${AUCTION_ITEMS.length}개의 가치관 목록으로 DB를 초기화하시겠습니까?`)) return;
+    if (!confirm(`[${sessionId}] ${AUCTION_ITEMS.length}개의 가치관 목록으로 DB를 초기화하시겠습니까?\n현재 세션의 입찰만 삭제됩니다.`)) return;
     setIsSyncLoading(true);
     try {
-      await supabase.from("bids").delete().filter("id", "not.is", null);
-      await supabase.from("auction_items").delete().filter("id", "not.is", null);
-      const items = AUCTION_ITEMS.map((val) => ({ title: val, current_bid: 0, status: "pending" }));
-      const { error } = await supabase.from("auction_items").insert(items);
-      if (error) throw error;
+      const res = await fetch("/api/admin/init-auction", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sessionId }),
+      });
+      const result = await res.json();
+      if (!result.success) throw new Error(result.error);
       alert("가치관 목록 동기화 완료!");
     } catch (err: any) {
       alert("동기화 오류: " + err.message);
@@ -101,15 +147,15 @@ export default function UsersPage() {
     }
   };
 
-  // --- Auction Reset ---
+  // --- Auction Reset (현재 세션만) ---
   const resetAuction = async () => {
-    if (!confirm("경매를 초기화하시겠습니까?\n- 모든 입찰 삭제\n- 아이템 pending 상태\n- 잔액 5000 복구")) return;
+    if (!confirm(`[${sessionId}] 경매를 초기화하시겠습니까?\n- 현재 세션 입찰만 삭제\n- 아이템 pending 상태\n- 현재 세션 유저 잔액 5000 복구`)) return;
     setIsAuctionResetLoading(true);
     try {
-      await supabase.from("bids").delete().neq("id", "00000000-0000-0000-0000-000000000000");
+      await supabase.from("bids").delete().eq("session_id", sessionId);
       await supabase.from("auction_items").update({ status: "pending", current_bid: 0, highest_bidder_id: null }).neq("id", "00000000-0000-0000-0000-000000000000");
-      await supabase.from("users").update({ balance: 5000 }).neq("id", "00000000-0000-0000-0000-000000000000");
-      alert("경매가 초기화되었습니다.");
+      await supabase.from("users").update({ balance: 5000 }).eq("session_id", sessionId);
+      alert(`[${sessionId}] 경매가 초기화되었습니다.`);
     } catch (err: any) {
       alert("초기화 오류: " + err.message);
     } finally {
@@ -117,13 +163,13 @@ export default function UsersPage() {
     }
   };
 
-  // --- Feed Reset ---
+  // --- Feed Reset (현재 세션만) ---
   const resetFeed = async () => {
-    if (!confirm("모든 좋아요(하트) 기록을 삭제하시겠습니까?")) return;
+    if (!confirm(`[${sessionId}] 좋아요(하트) 기록을 삭제하시겠습니까?`)) return;
     setIsFeedResetLoading(true);
     try {
-      await supabase.from("feed_likes").delete().neq("id", "00000000-0000-0000-0000-000000000000");
-      alert("피드 좋아요가 초기화되었습니다.");
+      await supabase.from("feed_likes").delete().eq("session_id", sessionId);
+      alert(`[${sessionId}] 피드 좋아요가 초기화되었습니다.`);
     } catch (err: any) {
       alert("초기화 오류: " + err.message);
     } finally {
@@ -131,27 +177,74 @@ export default function UsersPage() {
     }
   };
 
-  // --- Feed Init ---
-  const generateFeedRecords = async () => {
-    if (!confirm("모든 참가자의 사진 슬롯을 생성하시겠습니까?")) return;
+  // --- Feed Init (Drive Scan) ---
+  const [showDriveScan, setShowDriveScan] = useState(false);
+  const [driveFiles, setDriveFiles] = useState<any[]>([]);
+  const [driveScanLogs, setDriveScanLogs] = useState<string[]>([]);
+
+  const API_KEY = process.env.NEXT_PUBLIC_GOOGLE_DRIVE_API_KEY;
+  const FOLDER_ID = process.env.NEXT_PUBLIC_GOOGLE_DRIVE_FOLDER_ID;
+
+  const handleDriveScan = async () => {
+    if (!API_KEY || !FOLDER_ID) { alert("환경변수 설정 누락 (GOOGLE_DRIVE_API_KEY / FOLDER_ID)"); return; }
     setIsFeedInitLoading(true);
+    setShowDriveScan(true);
+    setDriveFiles([]);
+    const logs: string[] = [];
+    const addLog = (msg: string) => { logs.push(msg); setDriveScanLogs([...logs]); };
+
     try {
-      const { data: existing } = await supabase.from("feed_items").select("user_id, photo_number");
-      const existingSet = new Set((existing || []).map((r: any) => `${r.user_id}_${r.photo_number}`));
-      const newRecords: any[] = [];
-      users.forEach((user) => {
-        for (let i = 1; i <= 4; i++) {
-          if (!existingSet.has(`${user.id}_${i}`)) {
-            newRecords.push({ user_id: user.id, photo_number: i, order_prefix: "00", gender_code: user.gender || "F" });
-          }
+      // 1: Scan root folder
+      addLog(`🔍 루트 폴더 스캔 중...`);
+      const rootRes = await fetch(
+        `https://www.googleapis.com/drive/v3/files?q='${FOLDER_ID}'+in+parents&fields=files(id,name,mimeType)&pageSize=1000&key=${API_KEY}`
+      );
+      const rootData = await rootRes.json();
+      if (rootData.error) { addLog(`❌ Drive API 에러: ${rootData.error.message}`); return; }
+      const rootItems = rootData.files || [];
+      const rootFolders = rootItems.filter((f: any) => f.mimeType === "application/vnd.google-apps.folder");
+      addLog(`📂 루트: 폴더 ${rootFolders.length}개 [${rootFolders.map((f: any) => f.name).join(", ")}]`);
+
+      // 2: Find date folder
+      let targetFolderId = FOLDER_ID;
+      let folderName = "루트";
+      if (ctx.sessionDate) {
+        const dateFolder = rootFolders.find((f: any) => f.name === ctx.sessionDate);
+        if (dateFolder) {
+          targetFolderId = dateFolder.id;
+          folderName = ctx.sessionDate;
+          addLog(`✅ '${ctx.sessionDate}' 폴더 발견`);
+        } else {
+          addLog(`⚠️ '${ctx.sessionDate}' 폴더 없음! 루트에서 스캔`);
         }
+      } else {
+        addLog(`⚠️ sessionDate 비어있음 → 루트에서 스캔`);
+      }
+
+      // 3: Scan target folder for images
+      addLog(`🔍 ${folderName} 폴더 내부 스캔 중...`);
+      const filesRes = await fetch(
+        `https://www.googleapis.com/drive/v3/files?q='${targetFolderId}'+in+parents&fields=files(id,name,mimeType)&pageSize=1000&key=${API_KEY}`
+      );
+      const filesData = await filesRes.json();
+      if (filesData.error) { addLog(`❌ Drive API 에러: ${filesData.error.message}`); return; }
+      const imageFiles = (filesData.files || []).filter((f: any) => f.mimeType?.startsWith("image/"));
+      setDriveFiles(imageFiles);
+
+      // 4: Match check
+      const sessionNum = String(ctx.sessionNum).padStart(2, "0");
+      const sessionFiles = imageFiles.filter((f: any) => {
+        const info = parseDriveFileName(f.name);
+        return info && info.session === sessionNum;
       });
-      if (newRecords.length === 0) { alert("모든 슬롯이 이미 존재합니다."); return; }
-      const { error } = await supabase.from("feed_items").insert(newRecords);
-      if (error) throw error;
-      alert(`${newRecords.length}개 레코드 생성 완료.`);
-    } catch (err: any) {
-      alert("오류: " + err.message);
+      const matchedCount = sessionFiles.filter((f: any) => {
+        const info = parseDriveFileName(f.name);
+        return info && users.some(u => String(u.real_name).trim() === info.realName && String(u.phone_suffix).trim() === info.phoneSuffix);
+      }).length;
+      addLog(`📸 이미지 ${imageFiles.length}개 (현재 회차: ${sessionFiles.length}개, 매칭: ${matchedCount}/${users.length}명)`);
+      addLog(`✅ 스캔 완료`);
+    } catch (e: any) {
+      addLog(`❌ 에러: ${e.message}`);
     } finally {
       setIsFeedInitLoading(false);
     }
@@ -355,7 +448,7 @@ export default function UsersPage() {
           <ActionButton label="Values Sync" icon={RefreshCw} loading={isSyncLoading} onClick={syncInventory} color={C.text} />
           <ActionButton label="Auction Reset" icon={Gavel} loading={isAuctionResetLoading} onClick={resetAuction} color={C.danger} />
           <ActionButton label="Feed Reset" icon={Heart} loading={isFeedResetLoading} onClick={resetFeed} color="#EC4899" />
-          <ActionButton label="Feed Init" icon={Sparkles} loading={isFeedInitLoading} onClick={generateFeedRecords} color={C.accent} />
+          <ActionButton label="Feed Scan" icon={ImageIcon} loading={isFeedInitLoading} onClick={handleDriveScan} color={C.accent} />
         </div>
       </section>
 
@@ -415,6 +508,129 @@ export default function UsersPage() {
                 {isResetLoading ? "처리 중..." : "초기화 실행"}
               </button>
               <button onClick={() => setShowResetConfirm(false)} className="mt-3 text-xs" style={{ color: C.muted }}>취소</button>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Drive Scan Modal */}
+      <AnimatePresence>
+        {showDriveScan && (
+          <div className="fixed inset-0 z-[100] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0 }}
+              className="rounded-2xl w-full max-w-2xl max-h-[85vh] overflow-hidden flex flex-col"
+              style={{ backgroundColor: C.card, border: `1px solid ${C.border}` }}
+            >
+              {/* Header */}
+              <div className="flex items-center justify-between p-5 border-b" style={{ borderColor: C.border }}>
+                <div className="flex items-center gap-3">
+                  <FolderOpen size={18} style={{ color: C.accent }} />
+                  <div>
+                    <h3 className="text-sm font-bold" style={{ color: C.text }}>Feed Drive Scan</h3>
+                    <p className="text-[10px] font-sans" style={{ color: C.muted }}>
+                      {ctx.sessionDate || "날짜 미설정"} / {ctx.sessionNum}회차
+                    </p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={handleDriveScan}
+                    disabled={isFeedInitLoading}
+                    className="px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wider flex items-center gap-1.5 transition-all disabled:opacity-50"
+                    style={{ backgroundColor: C.accent, color: "#fff" }}
+                  >
+                    {isFeedInitLoading ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />}
+                    Re-scan
+                  </button>
+                  <button onClick={() => setShowDriveScan(false)} className="p-1 rounded-lg hover:opacity-70" style={{ color: C.muted }}>
+                    <X size={18} />
+                  </button>
+                </div>
+              </div>
+
+              {/* Body */}
+              <div className="flex-1 overflow-y-auto p-5 space-y-4">
+                {/* Scan Logs */}
+                {driveScanLogs.length > 0 && (
+                  <div className="rounded-lg p-3 text-xs font-mono space-y-1" style={{ backgroundColor: "#0a0a0a", border: `1px solid ${C.border}` }}>
+                    <p className="text-[9px] font-sans font-bold uppercase tracking-widest mb-1.5" style={{ color: C.muted }}>Scan Log</p>
+                    {driveScanLogs.map((log, i) => (
+                      <p key={i} style={{ color: `${C.text}B0` }}>{log}</p>
+                    ))}
+                  </div>
+                )}
+
+                {/* User-File Match Table */}
+                {driveFiles.length > 0 && (
+                  <div className="rounded-lg overflow-hidden border" style={{ borderColor: C.border }}>
+                    <div className="px-4 py-2.5 flex items-center justify-between" style={{ backgroundColor: "#0D0D12" }}>
+                      <p className="text-[9px] font-sans font-bold uppercase tracking-widest" style={{ color: C.muted }}>
+                        DB 유저: <span style={{ color: C.text }}>{users.length}명</span> · Drive 이미지: <span style={{ color: C.text }}>{driveFiles.length}개</span>
+                      </p>
+                    </div>
+                    <div className="divide-y" style={{ borderColor: C.border }}>
+                      {users.map((u) => {
+                        const sessionNum = String(ctx.sessionNum).padStart(2, "0");
+                        const userFiles = driveFiles.filter(f => {
+                          const info = parseDriveFileName(f.name);
+                          return info && info.realName === String(u.real_name).trim() && info.phoneSuffix === String(u.phone_suffix).trim() && info.session === sessionNum;
+                        });
+                        const hasPhotos = userFiles.length > 0;
+                        return (
+                          <div key={u.id} className="flex items-center justify-between px-4 py-2.5" style={{ borderColor: C.border }}>
+                            <div className="flex items-center gap-3">
+                              {hasPhotos ? (
+                                <CheckCircle size={16} className="text-green-500 shrink-0" />
+                              ) : (
+                                <AlertCircle size={16} className="shrink-0" style={{ color: C.danger }} />
+                              )}
+                              <div>
+                                <p className="text-sm font-bold" style={{ color: C.text }}>{u.real_name}</p>
+                                <p className="text-[10px]" style={{ color: C.muted }}>{u.nickname} · {u.phone_suffix}</p>
+                              </div>
+                            </div>
+                            <span className={`text-[10px] font-bold font-sans uppercase tracking-wider ${hasPhotos ? "text-green-500" : ""}`} style={{ color: hasPhotos ? undefined : C.danger }}>
+                              {userFiles.length} photo{userFiles.length !== 1 ? "s" : ""}
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+
+                    {/* Unmatched files */}
+                    {(() => {
+                      const sessionNum = String(ctx.sessionNum).padStart(2, "0");
+                      const unmatched = driveFiles.filter(f => {
+                        const info = parseDriveFileName(f.name);
+                        if (!info || info.session !== sessionNum) return false;
+                        return !users.some(u => String(u.real_name).trim() === info.realName && String(u.phone_suffix).trim() === info.phoneSuffix);
+                      });
+                      if (unmatched.length === 0) return null;
+                      return (
+                        <div className="px-4 py-3 border-t" style={{ borderColor: C.border, backgroundColor: "#0D0D12" }}>
+                          <p className="text-[9px] font-sans font-bold uppercase tracking-widest mb-2" style={{ color: C.warning }}>
+                            매칭 안됨 ({unmatched.length}개)
+                          </p>
+                          {unmatched.map((f, i) => (
+                            <p key={i} className="text-xs font-mono" style={{ color: C.warning }}>
+                              ❌ {f.name}
+                            </p>
+                          ))}
+                        </div>
+                      );
+                    })()}
+                  </div>
+                )}
+
+                {driveFiles.length === 0 && driveScanLogs.length === 0 && (
+                  <p className="text-center py-8 text-sm italic" style={{ color: C.muted }}>
+                    스캔 버튼을 눌러 Drive 사진을 확인하세요.
+                  </p>
+                )}
+              </div>
             </motion.div>
           </div>
         )}

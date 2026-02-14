@@ -15,6 +15,7 @@ interface SystemSettings {
   is_report_open: string;
   current_session: string;
   max_hearts?: string;
+  session_ratio?: string;
 }
 
 interface UsePhaseRedirectOptions {
@@ -199,7 +200,9 @@ export function usePhaseRedirect(options: UsePhaseRedirectOptions) {
           current_phase: String(result.settings.current_phase || ""),
           is_feed_open: String(result.settings.is_feed_open || "false"),
           is_report_open: String(result.settings.is_report_open || "false"),
-          current_session: String(result.settings.current_session || "01")
+          current_session: String(result.settings.current_session || "01"),
+          max_hearts: result.settings.max_hearts || undefined,
+          session_ratio: result.settings.session_ratio || undefined,
         };
       } else {
         console.warn("Settings fetch returned error:", result.error);
