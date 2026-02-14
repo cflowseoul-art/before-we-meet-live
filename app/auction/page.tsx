@@ -205,8 +205,12 @@ export default function AuctionPage() {
           alert(`'${result.winnerNickname}'님보다 ${result.timeDiffSec}초 늦었어요! 다시 도전!`);
         } else if (result.error === 'Insufficient balance') {
           alert(`잔액이 부족합니다. 현재 잔액: ${result.current?.toLocaleString()}만원`);
+        } else if (result.error?.startsWith('Minimum bid')) {
+          alert(`입찰가가 현재 최고가보다 낮습니다. 최소 ${result.minBid?.toLocaleString()}만원 이상 입찰하세요.`);
+        } else if (result.error === 'Auction is not active') {
+          alert("현재 진행 중인 경매가 아닙니다.");
         } else {
-          alert("입찰 중 오류가 발생했습니다.");
+          alert(`입찰 오류: ${result.error || "알 수 없는 오류"}`);
         }
         fetchAuctionData();
         return;
