@@ -6,7 +6,7 @@ import { useAdminSession } from "@/lib/contexts/admin-session-context";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Loader2, Heart, Volume2, Sparkles, Crown, Star,
-  MessageCircle, X, CheckCircle, AlertCircle
+  MessageCircle, X
 } from "lucide-react";
 
 const C = {
@@ -25,8 +25,6 @@ export default function MCPage() {
   const ctx = useAdminSession();
   const sessionId = `${ctx.sessionDate}_${ctx.sessionNum}`;
 
-  const [isFinalizing, setIsFinalizing] = useState(false);
-  const [finalizeResult, setFinalizeResult] = useState<{ success: boolean; message: string } | null>(null);
   const [groupedMatches, setGroupedMatches] = useState<any[]>([]);
   const [isMatchLoading, setIsMatchLoading] = useState(true);
   const [selectedMatch, setSelectedMatch] = useState<any>(null);
@@ -50,30 +48,6 @@ export default function MCPage() {
     }
     setIsMatchLoading(false);
   }, [sessionId]);
-
-  const handleFinalize = async () => {
-    if (!confirm("최종 매칭을 확정하시겠습니까?\n기존 매칭 데이터를 삭제하고 새로운 결과를 생성합니다.")) return;
-    setIsFinalizing(true);
-    setFinalizeResult(null);
-    try {
-      const res = await fetch("/api/admin/finalize-matches", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sessionId }),
-      });
-      const data = await res.json();
-      if (data.success) {
-        setFinalizeResult({ success: true, message: `매칭 완료! ${data.matches_created}개 생성.` });
-        fetchMatches();
-      } else {
-        setFinalizeResult({ success: false, message: data.error || "매칭 오류" });
-      }
-    } catch (err: any) {
-      setFinalizeResult({ success: false, message: err.message });
-    } finally {
-      setIsFinalizing(false);
-    }
-  };
 
   const getRankStyle = (rank: number) => {
     if (rank === 1) return { bg: `${C.warning}20`, border: `${C.warning}60`, color: C.warning };
@@ -110,33 +84,6 @@ export default function MCPage() {
   return (
     <div className="p-4 md:p-8 max-w-6xl mx-auto space-y-6">
       <h2 className="text-2xl font-serif italic font-bold" style={{ color: C.text }}>MC Master Board</h2>
-
-      {/* ─── 매칭 확정 ─── */}
-      <section className="rounded-xl border p-6" style={{ backgroundColor: C.card, borderColor: C.border }}>
-        <h3 className="text-[10px] font-sans font-bold uppercase tracking-[0.3em] mb-4" style={{ color: C.success }}>
-          매칭 확정
-        </h3>
-
-        <button
-          onClick={handleFinalize}
-          disabled={isFinalizing}
-          className="w-full py-4 rounded-lg border-2 border-dashed flex items-center justify-center gap-3 transition-all hover:opacity-80 disabled:opacity-50"
-          style={{ borderColor: `${C.success}40`, color: C.success }}
-        >
-          {isFinalizing ? <Loader2 size={18} className="animate-spin" /> : <Sparkles size={18} />}
-          <span className="font-bold text-sm">{isFinalizing ? "Gale-Shapley 알고리즘 실행 중..." : "최종 매칭 확정"}</span>
-        </button>
-
-        {finalizeResult && (
-          <div className="mt-3 p-3 rounded-lg flex items-center gap-2" style={{
-            backgroundColor: finalizeResult.success ? `${C.success}10` : `${C.danger}10`,
-            color: finalizeResult.success ? C.success : C.danger,
-          }}>
-            {finalizeResult.success ? <CheckCircle size={14} /> : <AlertCircle size={14} />}
-            <span className="text-sm">{finalizeResult.message}</span>
-          </div>
-        )}
-      </section>
 
       {/* ─── 매칭 결과 테이블 ─── */}
       <section className="rounded-xl border p-6" style={{ backgroundColor: C.card, borderColor: C.border }}>
