@@ -561,9 +561,9 @@ export async function POST(request: Request) {
         let compatibilityScore: number;
 
         if (!hasAuctionEvidence && !hasMutualHearts) {
-          // 공통 가치관 0 + 상호 하트 0 → 25~40%
+          // 공통 가치관 0 + 상호 하트 0 → 무조건 50% 미만 (25~45%)
           const feedOnly = Math.min(1, sd.feedScore / 25);
-          compatibilityScore = Math.round(25 + feedOnly * 15);
+          compatibilityScore = Math.min(49, Math.round(25 + feedOnly * 20));
         } else {
           // 근거 있음 → rawScore 비례로 밴드 스케일링
           const evidenceRatio = Math.min(1, m.rawScore / 75);
@@ -615,6 +615,11 @@ export async function POST(request: Request) {
       const scores = pairScores.get(key);
       if (scores && scores.length === 2) {
         m.compatibility_score = Math.round((scores[0] + scores[1]) / 2);
+      }
+      // 안전장치: 공통 가치관 0 + 상호 하트 0 → 50% 미만 강제
+      const md = m.match_data;
+      if (md.common_values?.length === 0 && !md.is_mutual) {
+        m.compatibility_score = Math.min(m.compatibility_score, 49);
       }
     });
 
