@@ -189,10 +189,10 @@ export default function FinalReportPage({ params }: { params: any }) {
   const buildReport = useCallback(async (uid: string) => {
     // 모든 데이터 병렬 fetch
     const [usersRes, bidsRes, itemsRes, feedbackRes, feedLikesRes] = await Promise.all([
-      supabase.from("users").select("*"),
-      supabase.from("bids").select("*"),
-      supabase.from("auction_items").select("*"),
-      supabase.from("conversation_feedback").select("*").eq("partner_id", uid),
+      supabase.from("users").select("id, nickname, gender"),
+      supabase.from("bids").select("user_id, auction_item_id, amount"),
+      supabase.from("auction_items").select("id, title"),
+      supabase.from("conversation_feedback").select("vibe, feedback_text, self_identity, perceived_charm, charms, round").eq("partner_id", uid),
       supabase.from("feed_likes").select("user_id, target_user_id"),
     ]);
 

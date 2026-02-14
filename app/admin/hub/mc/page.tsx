@@ -33,9 +33,9 @@ export default function MCPage() {
 
   const fetchMatches = useCallback(async () => {
     setIsMatchLoading(true);
-    const { data: usersData } = await supabase.from("users").select("*").eq("session_id", sessionId);
+    const { data: usersData } = await supabase.from("users").select("id, nickname, gender").eq("session_id", sessionId);
     const usersMap = new Map((usersData || []).map((u: any) => [u.id, u]));
-    const { data: matchesData } = await supabase.from("matches").select("*").eq("session_id", sessionId).order("match_rank", { ascending: true });
+    const { data: matchesData } = await supabase.from("matches").select("user1_id, user2_id, match_rank, compatibility_score").eq("session_id", sessionId).order("match_rank", { ascending: true });
 
     if (matchesData) {
       const females = (usersData || []).filter((u: any) => ["여성", "여", "F"].includes(u.gender));

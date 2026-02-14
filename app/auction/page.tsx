@@ -52,16 +52,16 @@ export default function AuctionPage() {
     const [itemsRes, userRes, bidsRes] = await Promise.all([
       supabase
         .from("auction_items")
-        .select("*")
+        .select("id, title, status, current_bid, highest_bidder_id, created_at")
         .order("created_at", { ascending: true }),
       supabase
         .from("users")
-        .select("*")
+        .select("id, nickname, gender, balance, session_id")
         .eq("id", userId)
         .single(),
       supabase
         .from("bids")
-        .select("*")
+        .select("id, user_id, auction_item_id, amount, created_at")
         .eq("user_id", userId)
         .order("created_at", { ascending: true })
     ]);

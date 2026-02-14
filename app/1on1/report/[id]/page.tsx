@@ -249,10 +249,10 @@ export default function UserReportPage({ params }: { params: any }) {
 
       // ─── 데이터 소스 일원화: matches 테이블에서 공식 결과 조회 ───
       const [usersRes, matchesRes, bidsRes, itemsRes, feedLikesRes] = await Promise.all([
-        supabase.from("users").select("*"),
-        supabase.from("matches").select("*").eq("user1_id", uid).order("match_rank", { ascending: true }),
-        supabase.from("bids").select("*"),
-        supabase.from("auction_items").select("*"),
+        supabase.from("users").select("id, nickname, gender, real_name, phone_suffix, session_id"),
+        supabase.from("matches").select("user1_id, user2_id, match_rank, compatibility_score, match_data, session_id").eq("user1_id", uid).order("match_rank", { ascending: true }),
+        supabase.from("bids").select("user_id, auction_item_id, amount"),
+        supabase.from("auction_items").select("id, title"),
         supabase.from("feed_likes").select("user_id, target_user_id, photo_id")
       ]);
 

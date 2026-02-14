@@ -91,9 +91,9 @@ function AuctionTab({ onComplete }: { onComplete: () => void }) {
 
   const fetchLive = useCallback(async () => {
     const [iRes, uRes, bRes] = await Promise.all([
-      supabase.from("auction_items").select("*").order("id"),
-      supabase.from("users").select("*").eq("session_id", sessionId),
-      supabase.from("bids").select("*").eq("session_id", sessionId).order("created_at", { ascending: false }).limit(20),
+      supabase.from("auction_items").select("id, title, status, current_bid, highest_bidder_id").order("id"),
+      supabase.from("users").select("id, nickname, gender, balance").eq("session_id", sessionId),
+      supabase.from("bids").select("id, user_id, auction_item_id, amount, created_at").eq("session_id", sessionId).order("created_at", { ascending: false }).limit(20),
     ]);
     if (iRes.data) {
       const sorted = [...iRes.data].sort((a, b) => {
@@ -281,7 +281,7 @@ function FeedTab() {
     try {
       const [usersRes, likesRes] = await Promise.all([
         supabase.from("users").select("id, real_name, phone_suffix, gender").eq("session_id", session),
-        supabase.from("feed_likes").select("*").eq("session_id", session),
+        supabase.from("feed_likes").select("photo_id, user_id").eq("session_id", session),
       ]);
 
       let targetFolderId = FOLDER_ID;

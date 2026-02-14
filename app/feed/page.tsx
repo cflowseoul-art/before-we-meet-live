@@ -78,7 +78,7 @@ export default function FeedPage() {
     try {
       setIsLoading(true);
       const [usersRes, likesRes] = await Promise.all([
-        supabase.from("users").select("*"),
+        supabase.from("users").select("id, real_name, phone_suffix, nickname, gender"),
         supabase.from("feed_likes").select("user_id, target_user_id, photo_id")
       ]);
 

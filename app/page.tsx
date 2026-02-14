@@ -74,7 +74,7 @@ export default function Onboarding() {
     // 전체에서 이름+전화번호 중복 검색 (가장 최근 것)
     const { data } = await supabase
       .from("users")
-      .select("*")
+      .select("id, real_name, phone_suffix, nickname, gender, session_id, balance")
       .eq("real_name", realName)
       .eq("phone_suffix", phoneSuffix)
       .order("created_at", { ascending: false })
