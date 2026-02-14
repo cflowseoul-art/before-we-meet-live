@@ -201,7 +201,9 @@ export default function AuctionPage() {
       const result = await res.json();
 
       if (!result.success) {
-        if (result.error === 'Insufficient balance') {
+        if (result.error === 'outbid') {
+          alert(`'${result.winnerNickname}'님보다 ${result.timeDiffSec}초 늦었어요! 다시 도전!`);
+        } else if (result.error === 'Insufficient balance') {
           alert(`잔액이 부족합니다. 현재 잔액: ${result.current?.toLocaleString()}만원`);
         } else {
           alert("입찰 중 오류가 발생했습니다.");
