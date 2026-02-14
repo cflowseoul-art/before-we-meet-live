@@ -554,14 +554,24 @@ export async function POST(request: Request) {
         // 순위 밴드 기반 점수
         const rankScore = band[0] + relativeScore * (band[1] - band[0]);
 
-        // 실제 호환 근거 반영: rawScore / 이론적 최대(75=옥션만점)
-        // rawScore 0 → 30%, rawScore 75+ → 순위 밴드 점수 그대로
-        const evidenceRatio = Math.min(1, m.rawScore / 75);
-        const FLOOR = 30;
-        const compatibilityScore = Math.round(FLOOR + (rankScore - FLOOR) * evidenceRatio);
+        // 실제 호환 근거 기반 점수 조정
+        const sd = m.scoreData;
+        const hasAuctionEvidence = sd.auctionScore > 0;
+        const hasMutualHearts = sd.isMutual;
+        let compatibilityScore: number;
+
+        if (!hasAuctionEvidence && !hasMutualHearts) {
+          // 공통 가치관 0 + 상호 하트 0 → 25~40%
+          const feedOnly = Math.min(1, sd.feedScore / 25);
+          compatibilityScore = Math.round(25 + feedOnly * 15);
+        } else {
+          // 근거 있음 → rawScore 비례로 밴드 스케일링
+          const evidenceRatio = Math.min(1, m.rawScore / 75);
+          const FLOOR = 35;
+          compatibilityScore = Math.round(FLOOR + (rankScore - FLOOR) * evidenceRatio);
+        }
 
         // 희소 공통 가치관 계산
-        const sd = m.scoreData;
         let rarestCommonValue = sd.commonValues[0] || sd.partnerTopValue || '';
         let rarestCount = users.length;
         sd.commonValues.forEach(val => {
