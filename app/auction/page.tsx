@@ -451,7 +451,7 @@ export default function AuctionPage() {
                     </div>
                     <motion.button
                       onClick={handleBid}
-                      disabled={loading || !isValidBid}
+                      disabled={loading}
                       className="w-full text-white py-7 text-sm font-bold tracking-[0.3em] uppercase shadow-2xl disabled:bg-gray-200 rounded-full bg-[#1A1A1A]"
                       whileHover={{ backgroundColor: '#7DD3FC' }}
                       whileTap={{ scale: 0.98 }}
