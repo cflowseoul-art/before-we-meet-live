@@ -85,7 +85,7 @@ export default function MatchResultsPage() {
       const { data: matchesData, error } = await supabase
         .from("matches")
         .select("*")
-        .order("compatibility_score", { ascending: false });
+        .order("match_rank", { ascending: true });
 
       if (!error && matchesData) {
         const femaleUsers = users.filter(u =>
@@ -107,11 +107,11 @@ export default function MatchResultsPage() {
               ...m,
               user2: usersMap.get(m.user2_id)
             }))
-            .sort((a, b) => b.compatibility_score - a.compatibility_score)
+            .sort((a, b) => (a.match_rank || 0) - (b.match_rank || 0))
             .map((m, idx) => ({
               ...m,
-              rank: idx + 1,
-              insight: generateInsight(m.compatibility_score, idx + 1)
+              rank: m.match_rank || (idx + 1),
+              insight: generateInsight(m.compatibility_score, m.match_rank || (idx + 1))
             }));
 
           return {

@@ -158,7 +158,7 @@ function InnerPlanet({
           </mesh>
         )}
 
-        {partner.isMutual && (
+        {index < 2 && (
           <Html position={[planetSize + 0.1, planetSize + 0.1, 0]} center zIndexRange={[1, 0]} style={{ pointerEvents: "none" }}>
             <span className="text-[10px] drop-shadow-lg select-none">💗</span>
           </Html>
@@ -167,13 +167,7 @@ function InnerPlanet({
         <Html position={[0, -(planetSize + 0.4), 0]} center zIndexRange={[1, 0]} style={{ pointerEvents: "none" }}>
           <div className="text-center whitespace-nowrap select-none">
             <p className="text-[10px] text-white font-bold">{partner.nickname}</p>
-            {partner.feedScore > 0 ? (
-              <p className="text-[9px] text-indigo-300">{partner.score}%</p>
-            ) : (
-              <span className="text-[8px] px-1.5 py-0.5 bg-amber-500/80 text-white rounded-full">
-                가치관 매칭
-              </span>
-            )}
+            {index < 2 && <p className="text-[9px] text-indigo-300">{partner.score}%</p>}
           </div>
         </Html>
       </group>

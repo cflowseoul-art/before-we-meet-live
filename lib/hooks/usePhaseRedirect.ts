@@ -14,6 +14,7 @@ interface SystemSettings {
   is_feed_open: string;
   is_report_open: string;
   current_session: string;
+  max_hearts?: string;
 }
 
 interface UsePhaseRedirectOptions {
@@ -91,7 +92,7 @@ export function usePhaseRedirect(options: UsePhaseRedirectOptions) {
     }
 
     // 현재 회차 유저 → 기존 phase 로직
-    // completed phase → report/completed 페이지는 허용, 나머지는 /report-hub로
+    // completed phase → report-hub로 (completed/report 페이지는 허용)
     if (currentPhase === "completed" && currentPage !== "completed" && currentPage !== "report") {
       console.log("🏁 Redirecting to report-hub (completed phase)");
       window.location.href = "/report-hub";
@@ -103,7 +104,7 @@ export function usePhaseRedirect(options: UsePhaseRedirectOptions) {
         // completed 페이지에서 phase가 completed가 아니면 적절한 곳으로
         if (currentPhase !== "completed") {
           if (isReportOpen && userId) {
-            window.location.href = `/1on1/report/${userId}`;
+            window.location.href = `/1on1/loading/${userId}`;
           } else if (isFeedOpen) {
             window.location.href = "/feed";
           } else {
@@ -117,7 +118,7 @@ export function usePhaseRedirect(options: UsePhaseRedirectOptions) {
         // From auction: report takes priority, then feed
         if (isReportOpen && userId) {
           console.log("🏁 Redirecting to report from auction");
-          window.location.href = `/1on1/report/${userId}`;
+          window.location.href = `/1on1/loading/${userId}`;
           return true;
         }
         if (isFeedOpen) {
@@ -143,7 +144,7 @@ export function usePhaseRedirect(options: UsePhaseRedirectOptions) {
             return true;
           }
           console.log("🏁 Redirecting to report from feed");
-          window.location.href = `/1on1/report/${userId}`;
+          window.location.href = `/1on1/loading/${userId}`;
           return true;
         }
         if (!isFeedOpen) {
@@ -154,8 +155,8 @@ export function usePhaseRedirect(options: UsePhaseRedirectOptions) {
         break;
 
       case "report":
-        // From report: go back to feed or auction if report closed
-        if (!isReportOpen) {
+        // From report: go back to feed or auction if report closed (completed phase에서는 유지)
+        if (!isReportOpen && currentPhase !== "completed") {
           if (isFeedOpen) {
             console.log("📸 Redirecting to feed from report");
             window.location.href = "/feed";
@@ -260,9 +261,8 @@ export function usePhaseRedirect(options: UsePhaseRedirectOptions) {
           return;
         }
 
-        // Handle current_phase change to completed (report 페이지는 유지)
+        // Handle current_phase change to completed → report-hub로 이동 (report 페이지는 유지)
         if (key === "current_phase" && stringValue === "completed" && currentPage !== "report") {
-          // 이전 회차 유저가 아닌 경우만 redirect
           console.log("🏁 Phase changed to completed - redirecting to report-hub");
           window.location.href = "/report-hub";
           return;
@@ -276,8 +276,8 @@ export function usePhaseRedirect(options: UsePhaseRedirectOptions) {
               console.log("🏁 Report opened - calling custom handler");
               onReportOpened();
             } else {
-              console.log("🏁 Report opened - redirecting to report");
-              window.location.href = `/1on1/report/${userId}`;
+              console.log("🏁 Report opened - redirecting to loading screen");
+              window.location.href = `/1on1/loading/${userId}`;
             }
           } else if (stringValue === "false" && currentPage === "report") {
             console.log("🔄 Report closed - checking where to redirect");

@@ -227,6 +227,25 @@ function normalizeScore(rawScore: number, minRaw: number, maxRaw: number): numbe
   return Math.round(60 + normalized * 35); // 60~95 구간
 }
 
+// 동적 하트 수 계산: H = max(3, round(2.5 × √N))
+function computeMaxHearts(N: number): number {
+  return Math.max(3, Math.round(2.5 * Math.sqrt(N)));
+}
+
+// 동적 순위 점수 구간 계산 (nFactor 선형 보간)
+function computeScoreBand(rank: number, N: number): [number, number] {
+  const BASE_LOW  = [90, 80, 70, 55];
+  const BASE_HIGH = [95, 85, 75, 65];
+  const MAX_LOW   = [95, 88, 81, 74];
+  const MAX_HIGH  = [99, 93, 86, 79];
+  const idx = Math.min(rank - 1, 3);
+  const nFactor = Math.min(1, Math.max(0, (N - 4) / 16));
+  return [
+    Math.round(BASE_LOW[idx]  + (MAX_LOW[idx]  - BASE_LOW[idx])  * nFactor),
+    Math.round(BASE_HIGH[idx] + (MAX_HIGH[idx] - BASE_HIGH[idx]) * nFactor),
+  ];
+}
+
 export async function POST(request: Request) {
   try {
     const { sessionId } = await request.json();
@@ -302,7 +321,8 @@ export async function POST(request: Request) {
     });
 
     // 5. 모든 점수 계산 (고도화된 알고리즘)
-    const MAX_HEARTS = 5;
+    const N = Math.min(females.length, males.length);
+    const MAX_HEARTS = computeMaxHearts(N);
 
     // Tie-breaker용: 각 유저의 첫 액션 시간 계산
     const userFirstActionTime: Record<string, number> = {};
@@ -367,7 +387,8 @@ export async function POST(request: Request) {
               String(b.auction_item_id) === String(itemIds[i]) ||
               String(b.item_id) === String(itemIds[i])
             ).length;
-            const scarcityBonus = itemBidders <= 3 ? 1.3 : itemBidders <= 5 ? 1.15 : 1;
+            const bidderRatio = users.length > 0 ? itemBidders / users.length : 1;
+            const scarcityBonus = bidderRatio <= 0.20 ? 1.3 : bidderRatio <= 0.35 ? 1.15 : 1;
 
             const ratio = Math.min(myBid, otherBid) / Math.max(myBid, otherBid);
             auctionScore += ratio * scarcityBonus;
@@ -378,16 +399,16 @@ export async function POST(request: Request) {
           }
         }
 
-        // 정규화 (최대값 기준)
+        // 정규화 (최대값 기준) — 옥션 가중치 75 (가치관 우선)
         const maxPossibleOverlap = Math.min(
           myVector.filter(v => v > 0).length,
           otherVector.filter(v => v > 0).length
         );
         if (maxPossibleOverlap > 0) {
-          auctionScore = (auctionScore / maxPossibleOverlap) * 70;
+          auctionScore = (auctionScore / maxPossibleOverlap) * 75;
         }
 
-        // [2.2] 시각적 호감도 (30%) - 지수형 배점
+        // [2.2] 시각적 호감도 — 가치관 보조 지표 (max 25)
         const myLikesToCandidate = likes.filter(l =>
           String(l.user_id) === String(user.id) &&
           String(l.target_user_id) === String(candidate.id)
@@ -398,23 +419,30 @@ export async function POST(request: Request) {
           String(l.target_user_id) === String(user.id)
         ).length;
 
-        // 공식: 30 × (선택한 하트 수 / 5)^1.2
-        const feedScore = 30 * Math.pow(Math.min(myLikesToCandidate, MAX_HEARTS) / MAX_HEARTS, 1.2);
+        // 내가 준 하트: 18 × (h/H) → 선형, max 18
+        const myHearts = Math.min(myLikesToCandidate, MAX_HEARTS);
+        const feedGivenScore = 18 * (myHearts / MAX_HEARTS);
 
-        // [2.3] 상호 보너스
+        // 상대가 나에게 준 하트: 7 × (h/H) → 선형, max 7
+        const theirHearts = Math.min(candidateLikesToMe, MAX_HEARTS);
+        const feedReceivedScore = 7 * (theirHearts / MAX_HEARTS);
+
+        const feedScore = feedGivenScore + feedReceivedScore;
+
+        // [2.3] 상호 보너스 (가벼운 가산)
         const isMutual = myLikesToCandidate > 0 && candidateLikesToMe > 0;
         let rawScore = auctionScore + feedScore;
 
-        // Mutual Like 1.5배 승수
         if (isMutual) {
-          rawScore *= 1.5;
+          const minHearts = Math.min(myHearts, theirHearts);
+          const heartRatio = MAX_HEARTS > 0 ? minHearts / MAX_HEARTS : 0;
+          if (heartRatio >= 0.6) rawScore *= 1.3;
+          else if (heartRatio >= 0.4) rawScore *= 1.2;
+          else rawScore *= 1.1;
         }
 
-        // 무관심 페널티: 하트 0개면 15% 감산
-        const hasVisualPenalty = myLikesToCandidate === 0 && auctionScore > 30;
-        if (hasVisualPenalty) {
-          rawScore *= 0.85;
-        }
+        // 무관심 페널티 제거 — 가치관 일치가 충분한 가중치를 가짐
+        const hasVisualPenalty = false;
 
         // Tie-breaker: 두 유저 중 먼저 액션한 시간
         const firstActionTime = Math.min(
@@ -440,96 +468,97 @@ export async function POST(request: Request) {
       }
     }
 
-    // 6. 점수 정규화 (60~95% 구간)
-    const rawScores = allScores.map(s => s.rawScore);
-    const minRaw = Math.min(...rawScores);
-    const maxRaw = Math.max(...rawScores);
+    // 6. 반복 Gale-Shapley: 라운드별 유니크 매칭
+    const totalRounds = Math.min(females.length, males.length, 4);
+    // 임시 저장: { from, to, round, scoreData }
+    const rawMatches: { from: string; to: string; round: number; rawScore: number; scoreData: typeof allScores[0] }[] = [];
 
-    // 7. 선호도 리스트 생성
-    const femalePreferences: Preference[] = females.map(f => {
-      const prefs = allScores
-        .filter(s => s.from === f.id)
-        .sort((a, b) => b.rawScore - a.rawScore)
-        .map(s => ({
-          candidateId: s.to,
-          score: normalizeScore(s.rawScore, minRaw, maxRaw)
-        }));
-      return { userId: f.id, preferenceList: prefs };
-    });
+    // 라운드별 이미 매칭된 쌍 추적
+    const usedPairs = new Map<string, Set<string>>();
+    users.forEach(u => usedPairs.set(u.id, new Set()));
 
-    const malePreferences: Preference[] = males.map(m => {
-      const prefs = allScores
-        .filter(s => s.from === m.id)
-        .sort((a, b) => b.rawScore - a.rawScore)
-        .map(s => ({
-          candidateId: s.to,
-          score: normalizeScore(s.rawScore, minRaw, maxRaw)
-        }));
-      return { userId: m.id, preferenceList: prefs };
-    });
+    for (let round = 1; round <= totalRounds; round++) {
+      const femalePrefs: Preference[] = females.map(f => {
+        const excluded = usedPairs.get(f.id) || new Set();
+        const prefs = allScores
+          .filter(s => s.from === f.id && !excluded.has(s.to))
+          .sort((a, b) => b.rawScore - a.rawScore)
+          .map(s => ({ candidateId: s.to, score: s.rawScore }));
+        return { userId: f.id, preferenceList: prefs };
+      });
 
-    // 8. Gale-Shapley 알고리즘 실행 (여성 제안, 남성 수락)
-    const stableMatches = galeShapleyMatching(femalePreferences, malePreferences);
+      const malePrefs: Preference[] = males.map(m => {
+        const excluded = usedPairs.get(m.id) || new Set();
+        const prefs = allScores
+          .filter(s => s.from === m.id && !excluded.has(s.to))
+          .sort((a, b) => b.rawScore - a.rawScore)
+          .map(s => ({ candidateId: s.to, score: s.rawScore }));
+        return { userId: m.id, preferenceList: prefs };
+      });
 
-    // 9. 매칭 결과 생성 (Gale-Shapley 결과 반영 + 상위 3명)
+      const roundMatches = galeShapleyMatching(femalePrefs, malePrefs);
+
+      roundMatches.forEach((femaleId, maleId) => {
+        usedPairs.get(femaleId)?.add(maleId);
+        usedPairs.get(maleId)?.add(femaleId);
+
+        // 양방향 저장
+        for (const pair of [{ from: femaleId, to: maleId }, { from: maleId, to: femaleId }]) {
+          const scoreData = allScores.find(s => s.from === pair.from && s.to === pair.to);
+          if (scoreData) {
+            rawMatches.push({ from: pair.from, to: pair.to, round, rawScore: scoreData.rawScore, scoreData });
+          }
+        }
+      });
+    }
+
+    // 7. 순위 구간 기반 점수 할당
+    //    match_rank = Gale-Shapley 라운드 (각 라운드에서 모든 여성의 상대가 다름)
+    //    compatibility_score = 순위 구간 내에서 raw score 기반 배치
+    //    → 1순위는 반드시 2순위보다 높은 % 보장
+    // 동적 순위 구간 (N에 따라 선형 보간)
+    const RANK_BANDS: [number, number][] = [
+      computeScoreBand(1, N),
+      computeScoreBand(2, N),
+      computeScoreBand(3, N),
+      computeScoreBand(4, N),
+    ];
+
     const matchesToInsert: any[] = [];
     let matchesCreated = 0;
 
-    // Gale-Shapley 결과를 역방향 매핑 (male -> female)
-    const stableMatchReverse = new Map<string, string>();
-    stableMatches.forEach((femaleId, maleId) => {
-      stableMatchReverse.set(femaleId, maleId);
+    // 유저별로 그룹핑
+    const byUser = new Map<string, typeof rawMatches>();
+    rawMatches.forEach(m => {
+      const list = byUser.get(m.from) || [];
+      list.push(m);
+      byUser.set(m.from, list);
     });
 
-    for (const user of users) {
-      const userScores = allScores
-        .filter(s => s.from === user.id)
-        .sort((a, b) => {
-          // 1. Mutual은 최우선
-          if (a.isMutual && !b.isMutual) return -1;
-          if (!a.isMutual && b.isMutual) return 1;
+    byUser.forEach(userMatches => {
+      // 이 유저의 raw score 범위 계산
+      const scores = userMatches.map(m => m.rawScore);
+      const userMin = Math.min(...scores);
+      const userMax = Math.max(...scores);
+      const scoreRange = userMax - userMin;
 
-          // 2. 점수 비교
-          const scoreDiff = b.rawScore - a.rawScore;
-          if (Math.abs(scoreDiff) > 0.001) return scoreDiff;
+      userMatches.forEach(m => {
+        const rank = m.round;
+        const band = RANK_BANDS[rank - 1] || RANK_BANDS[RANK_BANDS.length - 1];
 
-          // 3. Tie-breaker: 먼저 액션한 쪽이 우선
-          return a.firstActionTime - b.firstActionTime;
-        });
+        // 유저 내 상대적 위치 (0~1)
+        const relativeScore = scoreRange > 0
+          ? (m.rawScore - userMin) / scoreRange
+          : 0.5;
 
-      // Gale-Shapley 안정적 매칭 파트너 확인
-      const isFemale = user.gender === '여성' || user.gender === '여' || user.gender === 'F';
-      let stablePartnerId: string | undefined;
+        // 구간 내 배치
+        const compatibilityScore = Math.round(band[0] + relativeScore * (band[1] - band[0]));
 
-      if (isFemale) {
-        // 여성의 경우: stableMatches에서 이 여성을 선택한 남성 찾기
-        stableMatches.forEach((femaleId, maleId) => {
-          if (femaleId === user.id) stablePartnerId = maleId;
-        });
-      } else {
-        // 남성의 경우: 이 남성이 매칭된 여성 찾기
-        stablePartnerId = stableMatches.get(user.id);
-      }
-
-      // 상위 4명 선정 (안정적 매칭 파트너가 있으면 1순위로 보장)
-      let topN = userScores.slice(0, 4);
-
-      if (stablePartnerId) {
-        const stableMatch = userScores.find(s => s.to === stablePartnerId);
-        if (stableMatch) {
-          // 안정적 매칭 파트너를 1순위로 이동
-          topN = [stableMatch, ...userScores.filter(s => s.to !== stablePartnerId).slice(0, 3)];
-        }
-      }
-
-      topN.forEach((match) => {
-        const normalizedScore = normalizeScore(match.rawScore, minRaw, maxRaw);
-
-        // 희소 공통 가치관 계산 (가장 입찰자 수가 적은 공통 항목)
-        let rarestCommonValue = match.commonValues[0] || match.partnerTopValue || '';
+        // 희소 공통 가치관 계산
+        const sd = m.scoreData;
+        let rarestCommonValue = sd.commonValues[0] || sd.partnerTopValue || '';
         let rarestCount = users.length;
-
-        match.commonValues.forEach(val => {
+        sd.commonValues.forEach(val => {
           const count = valueBidderCounts[val] || users.length;
           if (count < rarestCount) {
             rarestCount = count;
@@ -538,25 +567,27 @@ export async function POST(request: Request) {
         });
 
         matchesToInsert.push({
-          user1_id: user.id,
-          user2_id: match.to,
-          compatibility_score: normalizedScore,
+          user1_id: m.from,
+          user2_id: m.to,
+          compatibility_score: compatibilityScore,
+          match_rank: rank,
+          session_id: sessionId,
           match_data: {
-            auction_score: Math.round(match.auctionScore),
-            feed_score: Math.round(match.feedScore),
-            is_mutual: match.isMutual,
-            common_values: match.commonValues,
+            auction_score: Math.round(sd.auctionScore),
+            feed_score: Math.round(sd.feedScore),
+            is_mutual: sd.isMutual,
+            common_values: sd.commonValues,
             rarest_common_value: rarestCommonValue,
             rarest_count: rarestCount,
             total_users: users.length,
-            partner_top_value: match.partnerTopValue
+            partner_top_value: sd.partnerTopValue
           }
         });
         matchesCreated++;
       });
-    }
+    });
 
-    // 10. 매칭 결과 일괄 삽입
+    // 8. 매칭 결과 일괄 삽입
     if (matchesToInsert.length > 0) {
       const { error: insertError } = await supabaseAdmin
         .from('matches')
@@ -571,11 +602,18 @@ export async function POST(request: Request) {
       }
     }
 
+    // max_hearts를 system_settings에 저장 (feed 페이지에서 참조)
+    await supabaseAdmin
+      .from('system_settings')
+      .upsert({ key: 'max_hearts', value: String(MAX_HEARTS) });
+
     return NextResponse.json({
       success: true,
       matches_created: matchesCreated,
       session_id: sessionId,
-      stable_pairs: stableMatches.size
+      rounds: totalRounds,
+      max_hearts: MAX_HEARTS,
+      per_gender_count: N
     });
 
   } catch (err: any) {

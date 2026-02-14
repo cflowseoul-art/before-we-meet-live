@@ -250,7 +250,7 @@ export default function UserReportPage({ params }: { params: any }) {
       // ─── 데이터 소스 일원화: matches 테이블에서 공식 결과 조회 ───
       const [usersRes, matchesRes, bidsRes, itemsRes, feedLikesRes] = await Promise.all([
         supabase.from("users").select("*"),
-        supabase.from("matches").select("*").eq("user1_id", uid).order("compatibility_score", { ascending: false }),
+        supabase.from("matches").select("*").eq("user1_id", uid).order("match_rank", { ascending: true }),
         supabase.from("bids").select("*"),
         supabase.from("auction_items").select("*"),
         supabase.from("feed_likes").select("user_id, target_user_id, photo_id")
@@ -529,7 +529,7 @@ export default function UserReportPage({ params }: { params: any }) {
   );
 
   return (
-    <div className="min-h-screen font-serif pb-24 antialiased select-none bg-gradient-to-b from-sky-50/50 to-[#FAF9F6] text-stone-700">
+    <div className="min-h-screen font-serif pb-24 select-none bg-gradient-to-b from-sky-50/50 to-[#FAF9F6] text-black">
       {/* Header */}
       <motion.header
         className="text-center pt-20 pb-12 px-6"
@@ -614,13 +614,7 @@ export default function UserReportPage({ params }: { params: any }) {
                   <h4 className="text-2xl font-bold">{solarPartners[selectedPlanet.index].nickname}</h4>
                 </div>
                 <div className="text-right">
-                  {solarPartners[selectedPlanet.index].feedScore > 0 ? (
-                    <p className="text-3xl font-black text-sky-500">{solarPartners[selectedPlanet.index].score}%</p>
-                  ) : (
-                    <span className="inline-block px-3 py-1.5 bg-gradient-to-r from-amber-400 to-orange-400 text-white text-xs font-bold rounded-full shadow-sm">
-                      가치관 올인원 매칭
-                    </span>
-                  )}
+                  <p className="text-3xl font-black text-sky-500">{solarPartners[selectedPlanet.index].score}%</p>
                   {solarPartners[selectedPlanet.index].isMutual && (
                     <span className="text-[9px] font-bold text-rose-500 flex items-center gap-1 justify-end mt-1">
                       <Heart size={10} fill="#f43f5e" /> Mutual
@@ -847,7 +841,7 @@ export default function UserReportPage({ params }: { params: any }) {
                   <div className="inline-flex items-center justify-center w-16 h-16 bg-emerald-100 rounded-full mb-4">
                     <Check size={32} className="text-emerald-500" />
                   </div>
-                  <p className="text-lg font-bold text-stone-700">잔상이 기록되었어요</p>
+                  <p className="text-lg font-bold text-black">잔상이 기록되었어요</p>
                 </motion.div>
               ) : surveyStep === 1 ? (
                 /* Step 1: Vibe */
@@ -855,10 +849,10 @@ export default function UserReportPage({ params }: { params: any }) {
                   <p className="text-[10px] font-sans font-black uppercase tracking-widest text-purple-500 mb-2">
                     Round {surveyRound}
                   </p>
-                  <h3 className="text-lg font-bold text-stone-700 mb-1">
+                  <h3 className="text-lg font-bold text-black mb-1">
                     {surveyPartner.nickname}님과의 대화,
                   </h3>
-                  <p className="text-lg font-bold text-stone-700 mb-6">어떠셨나요?</p>
+                  <p className="text-lg font-bold text-black mb-6">어떠셨나요?</p>
 
                   <div className="space-y-2.5">
                     {VIBE_OPTIONS.map((vibe) => (
@@ -873,7 +867,7 @@ export default function UserReportPage({ params }: { params: any }) {
                         className="w-full py-4 px-5 rounded-2xl border-2 border-stone-100 hover:border-purple-300 bg-white hover:bg-purple-50 transition-all flex items-center gap-3 text-left"
                       >
                         <span className="text-2xl">{vibe.emoji}</span>
-                        <span className="font-bold text-stone-700">{vibe.label}</span>
+                        <span className="font-bold text-black">{vibe.label}</span>
                       </motion.button>
                     ))}
                   </div>
@@ -884,7 +878,7 @@ export default function UserReportPage({ params }: { params: any }) {
                   <p className="text-[10px] font-sans font-black uppercase tracking-widest text-purple-500 mb-2">
                     Round {surveyRound}
                   </p>
-                  <h3 className="text-lg font-bold text-stone-700 mb-1">
+                  <h3 className="text-lg font-bold text-black mb-1">
                     어떤 점이 기억에 남나요?
                   </h3>
                   <p className="text-xs text-stone-400 mb-5">최대 2개 선택</p>

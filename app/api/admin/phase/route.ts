@@ -58,7 +58,7 @@ export async function GET() {
     const { data, error } = await supabaseAdmin
       .from('system_settings')
       .select('key, value')
-      .in('key', ['current_phase', 'is_feed_open', 'is_report_open', 'current_session', 'active_feedback_round', 'is_final_report_open', 'session_ratio']);
+      .in('key', ['current_phase', 'is_feed_open', 'is_report_open', 'current_session', 'active_feedback_round', 'is_final_report_open', 'session_ratio', 'max_hearts']);
 
     if (error) {
       return NextResponse.json({ success: false, error: error.message }, { status: 500 });

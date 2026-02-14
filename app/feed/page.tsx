@@ -7,8 +7,8 @@ import { Heart, X, Sparkles, AlertTriangle } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { parseDriveFileName } from "@/lib/utils/feed-parser";
 
-// 하트 최대 개수 제한 (1on1-spec.md 기준)
-const MAX_HEARTS = 5;
+// 하트 최대 개수 기본값 (system_settings의 max_hearts로 동적 갱신)
+const DEFAULT_MAX_HEARTS = 5;
 
 interface FeedItem {
   id: string;
@@ -40,6 +40,9 @@ export default function FeedPage() {
   const [optimisticStatus, setOptimisticStatus] = useState<Record<string, boolean>>({});
   const isSyncing = useRef<Record<string, boolean>>({});
   const [showReportModal, setShowReportModal] = useState(false);
+
+  // 동적 하트 제한 (system_settings에서 로드)
+  const [maxHearts, setMaxHearts] = useState(DEFAULT_MAX_HEARTS);
 
   // 하트 제한 경고 모달
   const [showHeartLimitWarning, setShowHeartLimitWarning] = useState(false);
@@ -124,7 +127,7 @@ export default function FeedPage() {
             user_id: currentUser?.id || "",
             target_user_id: String(matchedUser.id),
             nickname: matchedUser.nickname,
-            gender: info.gender,
+            gender: matchedUser.gender,
             photo_url: `https://lh3.googleusercontent.com/d/${file.id}=w800`,
             caption: info.caption
           } as FeedItem;
@@ -162,6 +165,13 @@ export default function FeedPage() {
       const raw = String(settings.current_session || "01");
       if (currentSession !== raw) {
         setCurrentSession(raw);
+      }
+      // 동적 하트 제한 반영
+      if (settings.max_hearts) {
+        const parsed = parseInt(settings.max_hearts, 10);
+        if (!isNaN(parsed) && parsed >= 3) {
+          setMaxHearts(parsed);
+        }
       }
     },
     onReportOpened: handleReportOpened
@@ -267,7 +277,7 @@ export default function FeedPage() {
     // 3. 하트 5개 제한 체크 (좋아요 추가 시에만)
     if (!currentlyLiked) {
       const currentHeartCount = getMyHeartCount();
-      if (currentHeartCount >= MAX_HEARTS) {
+      if (currentHeartCount >= maxHearts) {
         setShowHeartLimitWarning(true);
         return;
       }
@@ -333,12 +343,12 @@ export default function FeedPage() {
             <div className="flex items-center gap-3">
               {/* 하트 카운터 */}
               <div className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest border ${
-                myHeartCount >= MAX_HEARTS
+                myHeartCount >= maxHearts
                   ? 'bg-rose-50 border-rose-200 text-rose-500'
                   : 'bg-pink-50 border-pink-200 text-pink-500'
               }`}>
                 <Heart size={12} fill={myHeartCount > 0 ? "currentColor" : "none"} />
-                <span>{myHeartCount}/{MAX_HEARTS}</span>
+                <span>{myHeartCount}/{maxHearts}</span>
               </div>
               <div className="bg-[#FDF8F8] px-3 py-1 rounded-full text-[10px] text-[#A52A2A] font-black uppercase tracking-widest border border-[#A52A2A]/5">{displayItems.length} Photos</div>
             </div>
@@ -375,8 +385,8 @@ export default function FeedPage() {
                 <div className="flex flex-col items-end gap-1">
                   <span className="text-[10px] font-sans font-black text-gray-300 uppercase tracking-widest">{selectedItem.gender}</span>
                   {/* 남은 하트 표시 */}
-                  <span className={`text-[9px] font-sans font-bold ${myHeartCount >= MAX_HEARTS ? 'text-rose-400' : 'text-pink-400'}`}>
-                    {MAX_HEARTS - myHeartCount}개 남음
+                  <span className={`text-[9px] font-sans font-bold ${myHeartCount >= maxHearts ? 'text-rose-400' : 'text-pink-400'}`}>
+                    {maxHearts - myHeartCount}개 남음
                   </span>
                 </div>
               </div>
@@ -425,14 +435,14 @@ export default function FeedPage() {
 
                 {/* 설명 */}
                 <p className="text-sm text-gray-500 mb-6 leading-relaxed">
-                  최대 <span className="font-bold text-rose-500">{MAX_HEARTS}개</span>의 하트만 보낼 수 있어요.<br />
+                  최대 <span className="font-bold text-rose-500">{maxHearts}개</span>의 하트만 보낼 수 있어요.<br />
                   더 마음에 드는 분이 있다면<br />
                   기존 하트를 취소하고 다시 선택해주세요.
                 </p>
 
                 {/* 하트 시각화 */}
                 <div className="flex justify-center gap-2 mb-6">
-                  {[...Array(MAX_HEARTS)].map((_, i) => (
+                  {[...Array(maxHearts)].map((_, i) => (
                     <motion.div
                       key={i}
                       initial={{ scale: 0 }}

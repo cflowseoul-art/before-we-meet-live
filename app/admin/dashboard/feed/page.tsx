@@ -63,13 +63,35 @@ export default function FeedDashboard() {
   // 데이터 페칭 로직
   const fetchFeedData = useCallback(async (session: string) => {
     if (!FOLDER_ID || !API_KEY) return;
+
+    // session = "2026-02-08_02" → date = "2026-02-08", num = "02"
+    const sessionDate = session.includes('_') ? session.split('_')[0] : "";
+    const sessionNum = session.includes('_') ? session.split('_').pop()!.padStart(2, '0') : session.padStart(2, '0');
+
     try {
-      const [usersRes, likesRes, driveRes] = await Promise.all([
-        supabase.from("users").select("id, real_name, phone_suffix"),
+      const [usersRes, likesRes] = await Promise.all([
+        supabase.from("users").select("id, real_name, phone_suffix, gender"),
         supabase.from("feed_likes").select("*"),
-        fetch(`https://www.googleapis.com/drive/v3/files?q='${FOLDER_ID}'+in+parents+and+mimeType+contains+'image/'&fields=files(id,name)&key=${API_KEY}`)
       ]);
 
+      // 날짜 폴더 탐색 (user feed와 동일 로직)
+      let targetFolderId = FOLDER_ID;
+      if (sessionDate) {
+        const rootRes = await fetch(
+          `https://www.googleapis.com/drive/v3/files?q='${FOLDER_ID}'+in+parents&fields=files(id,name,mimeType)&pageSize=1000&key=${API_KEY}`
+        );
+        const rootData = await rootRes.json();
+        const dateFolder = (rootData.files || []).find((f: any) =>
+          f.mimeType === "application/vnd.google-apps.folder" && f.name === sessionDate
+        );
+        if (dateFolder) {
+          targetFolderId = dateFolder.id;
+        }
+      }
+
+      const driveRes = await fetch(
+        `https://www.googleapis.com/drive/v3/files?q='${targetFolderId}'+in+parents+and+mimeType+contains+'image/'&fields=files(id,name)&pageSize=1000&key=${API_KEY}`
+      );
       const driveData = await driveRes.json();
       const allFiles = driveData.files || [];
       const likes = likesRes.data || [];
@@ -84,7 +106,7 @@ export default function FeedDashboard() {
       const matchedItems: FeedItem[] = allFiles
         .map((file: any) => {
           const parsed = parseDriveFileName(file.name);
-          if (!parsed || parsed.session !== session) return null;
+          if (!parsed || parsed.session !== sessionNum) return null;
 
           const matchedUser = users.find(
             (u: any) => String(u.real_name).trim() === parsed.realName &&
@@ -96,7 +118,7 @@ export default function FeedDashboard() {
           return {
             id: file.id,
             photo_url: `https://lh3.googleusercontent.com/d/${file.id}=w800`,
-            gender: parsed.gender || "Unknown",
+            gender: (matchedUser as any).gender || "Unknown",
             target_user_id: String(matchedUser.id),
             like_count: likeCounts[file.id] || 0
           };

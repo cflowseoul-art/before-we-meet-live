@@ -13,10 +13,6 @@ export async function GET(
   try {
     const { userId } = await params;
 
-    // Lazy cleanup: 24시간 지난 스냅샷 삭제
-    const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
-    await supabaseAdmin.from('report_snapshots').delete().lt('created_at', cutoff);
-
     const { data, error } = await supabaseAdmin
       .from('report_snapshots')
       .select('report_type, snapshot_data, share_token, created_at')

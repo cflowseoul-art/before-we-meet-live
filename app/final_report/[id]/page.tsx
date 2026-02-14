@@ -6,10 +6,18 @@ import { supabase } from "@/lib/supabase";
 import { useRouter } from "next/navigation";
 import { getAuth } from "@/lib/utils/auth-storage";
 import { toPng } from "html-to-image";
+import jsPDF from "jspdf";
 import {
   Sparkles, Fingerprint, Users, Zap, Brain, Radio, Loader2,
-  Heart, Crown, MessageCircle, TrendingUp, Share2, Check, Download, Link, X
+  Heart, Crown, Share2, Check, Download, Link, X, FileText,
+  MoreHorizontal, MessageCircle, Send, Bookmark
 } from "lucide-react";
+import { Swiper, SwiperSlide } from "swiper/react";
+import { Pagination } from "swiper/modules";
+import "swiper/css";
+import "swiper/css/pagination";
+
+const TOTAL_SLIDES = 6;
 
 // ─── 다중 태그 매핑 (Subconscious Frequency 전용) ───
 const VALUE_TO_TAGS: Record<string, string[]> = {
@@ -135,7 +143,10 @@ export default function FinalReportPage({ params }: { params: any }) {
   const [isLoadingShare, setIsLoadingShare] = useState(false);
   const [isShareOpen, setIsShareOpen] = useState(false);
   const [isSavingImage, setIsSavingImage] = useState(false);
+  const [isSavingPdf, setIsSavingPdf] = useState(false);
   const reportRef = useRef<HTMLDivElement>(null);
+  const [activeSlide, setActiveSlide] = useState(0);
+  const [isLiked, setIsLiked] = useState(false);
 
   useEffect(() => {
     if (params) {
@@ -401,562 +412,670 @@ export default function FinalReportPage({ params }: { params: any }) {
 
   const d = reportData;
 
+  /* ── Slide-specific captions (Instagram style) ── */
+  const captions: string[] = [
+    // Slide 0: Aura
+    d?.aura
+      ? `✨ The Aura Card\n\n나의 아우라는 "${d.aura.aura}"\n${d.aura.description}\n\n오늘 경매에서 가장 많이 투자한 가치관이\n나만의 아우라를 만들어냈어요 🌙\n\n#시그니처 #아우라 #BeforeWeMeet`
+      : `✨ The Aura Card\n\n당신만의 시그니처 아우라를 확인하세요 🌙\n\n#시그니처 #아우라 #BeforeWeMeet`,
+
+    // Slide 1: Lone Pioneer
+    d?.rareValues?.[0]
+      ? `🔥 The Lone Pioneer\n\n"${d.rareValues[0].keyword}"\n전체 ${d.rareValues[0].totalUsers}명 중 ${d.rareValues[0].bidderCount}명만 선택한\n나만의 가치관 💎\n\n다수가 아닌, 나만의 신념을 따르는 사람.\n그게 바로 개척자의 자격이에요.\n\n#희소가치 #개척자 #나다움`
+      : `🔥 The Lone Pioneer\n\n절대 포기할 수 없는 나만의 가치관 💎\n\n#희소가치 #개척자`,
+
+    // Slide 2: Feedback
+    d?.charmRanking?.[0]
+      ? `💬 The Feedback\n\n대화 상대 ${d.feedbacks?.length || 0}명이 남긴 나의 온도 🌡️\n\n가장 많이 들은 매력 키워드\n👉 "${d.charmRanking[0].charm}"\n\n내가 모르던 나를, 오늘 처음 만난 사람들이\n알려주었네요 🫧\n\n#인연의잔상 #첫인상 #매력키워드`
+      : `💬 The Feedback\n\n대화 상대가 남긴 나의 온도 🌡️\n\n#인연의잔상 #첫인상`,
+
+    // Slide 3: Paradox
+    d?.selfIdentity
+      ? `🪞 Persona Paradox\n\n내가 표현한 나 → "${d.selfIdentity}"\n상대가 느낀 나 → "${d.perceivedCharm}"\n\n${d.isPardoxFound ? "의외의 반전이 발견되었어요 ⚡\n나도 몰랐던 매력이 대화 속에서\n자연스럽게 드러난 순간." : "내면과 외면이 하나로 통하는 사람 🤝\n꾸미지 않아도 전해지는 진정성,\n그게 가장 오래 남는 매력이에요."}\n\n#반전매력 #페르소나 #자아발견`
+      : `🪞 Persona Paradox\n\n의도와 인상 사이,\n반전 매력의 증명 ⚡\n\n#반전매력 #페르소나`,
+
+    // Slide 4: Instinct
+    d?.likedUserValues?.[0]
+      ? `💘 Subconscious Frequency\n\n피드에서 하트를 보낸 ${d.totalLikes}번의 선택을\n분석해 봤어요 🔍\n\n나의 본능이 가장 끌린 키워드\n👉 "${d.likedUserValues[0].keyword}"\n\n머리가 아닌 심장이 먼저 반응한 가치.\n그게 진짜 내 이상형의 단서일지도 🧭\n\n#무의식 #이상형분석 #본능의선택`
+      : `💘 Subconscious Frequency\n\n나의 본능이 향한 이상형 분석 🧭\n\n#무의식 #이상형분석`,
+
+    // Slide 5: Closing
+    `🕊️ The Closing\n\n오늘 짧은 시간 동안 보여준\n반짝이는 조각들을 모아,\n당신만의 이야기를 적어보았어요 ✏️\n\n'나한테 이런 모습이 있었나?' 싶은\n낯선 발견이 있었나요?\n\n아니면 역시나 싶은 다정한 나를\n다시 한번 확인하셨나요? 🌿\n\n처음 보는 사람들과 낯선 공간에서 보낸 오늘이,\n부디 마음 한구석에 예쁜 색깔로\n칠해졌길 바라요 🎨\n\n#BeforeWeMeetLive #시그니처리포트`,
+  ];
+
   return (
-    <div className="min-h-screen font-serif pb-24 antialiased select-none bg-gradient-to-b from-sky-50/50 to-[#FAF9F6]">
-      <div ref={reportRef}>
-      {/* Header — 딥스페이스 */}
-      <motion.header
-        className="text-center pt-16 pb-10 px-6 bg-[#070714] rounded-b-[2.5rem] relative overflow-hidden"
-        initial={{ opacity: 0, y: -20 }}
-        animate={{ opacity: 1, y: 0 }}
-      >
-        {/* 별 파티클 */}
-        {[
-          { top: "12%", left: "8%", size: 2, delay: 0.3, dur: 3 },
-          { top: "20%", left: "85%", size: 1.5, delay: 0.8, dur: 4 },
-          { top: "35%", left: "15%", size: 1, delay: 1.2, dur: 3.5 },
-          { top: "18%", left: "72%", size: 2.5, delay: 0.5, dur: 2.8 },
-          { top: "55%", left: "90%", size: 1, delay: 1.5, dur: 3.2 },
-          { top: "65%", left: "5%", size: 1.5, delay: 0.2, dur: 4.2 },
-          { top: "45%", left: "25%", size: 1, delay: 1.8, dur: 3.8 },
-          { top: "30%", left: "60%", size: 2, delay: 0.7, dur: 3 },
-          { top: "70%", left: "40%", size: 1.5, delay: 1.0, dur: 2.5 },
-          { top: "50%", left: "78%", size: 1, delay: 1.4, dur: 3.6 },
-          { top: "8%", left: "45%", size: 1.5, delay: 0.4, dur: 4.5 },
-          { top: "75%", left: "68%", size: 2, delay: 0.9, dur: 3.3 },
-        ].map((s, i) => (
-          <motion.div
-            key={i}
-            className="absolute rounded-full bg-white"
-            style={{ top: s.top, left: s.left, width: s.size, height: s.size }}
-            initial={{ opacity: 0 }}
-            animate={{ opacity: [0, 0.8, 0.2, 0.9, 0] }}
-            transition={{ delay: s.delay, duration: s.dur, repeat: Infinity, ease: "easeInOut" }}
-          />
-        ))}
+    <div className="min-h-dvh font-sans select-none bg-[#e8f4f8]">
+      {/* ── Custom Swiper pagination style ── */}
+      <style>{`
+        .ig-swiper .swiper-pagination { position: static; margin-top: 12px; }
+        .ig-swiper .swiper-pagination-bullet { width: 6px; height: 6px; background: #c7c7cc; opacity: 1; }
+        .ig-swiper .swiper-pagination-bullet-active { background: #3897f0; }
+      `}</style>
 
-        <motion.div
-          initial={{ scale: 0.8, opacity: 0 }}
-          animate={{ scale: 1, opacity: 1 }}
-          transition={{ delay: 0.2, type: "spring" }}
-          className="relative inline-flex items-center justify-center w-14 h-14 bg-gradient-to-br from-indigo-400 to-purple-500 rounded-full mb-5 shadow-[0_0_40px_rgba(129,140,248,0.3)]"
-        >
-          <Sparkles size={24} className="text-white" />
-        </motion.div>
-        <p className="relative text-[9px] font-sans font-black tracking-[0.4em] uppercase mb-3 text-indigo-300">The Signature</p>
-        <h1 className="relative text-2xl italic font-bold tracking-tight mb-2 text-white">{user?.nickname}님의 시그니처</h1>
-        <p className="relative text-xs text-indigo-200/50 mt-4 leading-relaxed max-w-md mx-auto">
-          오늘 이 공간에서 당신이 증명한 가치를<br />가장 아름다운 방식으로 복원했습니다.
-        </p>
-        <div className="relative h-px w-12 mx-auto bg-indigo-400/30 mt-6" />
-      </motion.header>
+      {/* ══════ Centered Instagram Feed Frame ══════ */}
+      <div className="flex items-start justify-center py-0 sm:py-6 px-0 sm:px-4">
+        <div className="w-full max-w-[450px] bg-white rounded-none sm:rounded-sm overflow-hidden shadow-sm">
 
-      <section className="max-w-xl mx-auto px-5 space-y-5 pt-6">
-
-        {/* ═══════ Section 1: The Aura Card ═══════ */}
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.3 }}
-          className="bg-white/90 backdrop-blur-xl border border-white/60 rounded-[2rem] p-6 shadow-xl shadow-indigo-100/30"
-        >
-          <div className="flex items-center gap-2 mb-3">
-            <Fingerprint size={16} className="text-indigo-500" />
-            <span className="text-[8px] font-sans font-black uppercase tracking-[0.3em] text-indigo-400">IDENTITY</span>
-          </div>
-          <h3 className="text-base font-bold text-stone-900 mb-1">The Aura Card</h3>
-          <p className="text-xs text-stone-900 mb-4">당신만의 시그니처 아우라</p>
-
-          {d?.aura ? (
-            <div className="space-y-5">
-              {/* Aura Badge */}
-              <div className={`bg-gradient-to-r ${d.aura.gradient} rounded-2xl p-5 text-center shadow-lg`}>
-                <p className="text-[9px] font-sans font-black uppercase tracking-[0.4em] text-white/70 mb-1.5">Your Aura</p>
-                <h4 className="text-xl font-black text-white mb-1.5">{d.aura.aura}</h4>
-                <p className="text-xs text-white/80 leading-relaxed break-keep">{d.aura.description}</p>
+          {/* ── Instagram Header ── */}
+          <div className="flex items-center justify-between px-3.5 py-2.5 border-b border-gray-100">
+            <div className="flex items-center gap-3">
+              {/* Profile ring (gradient border) */}
+              <div className="w-9 h-9 rounded-full p-[2px] bg-gradient-to-tr from-amber-400 via-rose-500 to-purple-600">
+                <div className="w-full h-full rounded-full bg-white flex items-center justify-center">
+                  <div className="w-[30px] h-[30px] rounded-full bg-gradient-to-br from-indigo-400 to-purple-500 flex items-center justify-center">
+                    <Sparkles size={14} className="text-white" />
+                  </div>
+                </div>
               </div>
+              <div className="leading-tight">
+                <p className="text-[13px] font-semibold text-gray-900">
+                  {user?.name || user?.nickname || "User"}{user?.nickname && user?.name ? ` (${user.nickname})` : ""}
+                </p>
+                <p className="text-[11px] text-gray-400">Before We Meet Live</p>
+              </div>
+            </div>
+            <button className="p-1 text-gray-900">
+              <MoreHorizontal size={20} />
+            </button>
+          </div>
 
-              {/* Top Values */}
-              <div className="space-y-2">
-                <p className="text-[10px] font-sans font-black uppercase tracking-widest text-stone-900 mb-3">Value Ranking</p>
+          {/* ── The Swiper (1:1 Square) ── */}
+          <div className="ig-swiper">
+            <Swiper
+              modules={[Pagination]}
+              pagination={{ clickable: true }}
+              onSlideChange={(s) => setActiveSlide(s.activeIndex)}
+              className="aspect-square"
+            >
+              {/* Slide 0: Intro + Aura */}
+              <SwiperSlide>
+                <div className="w-full h-full bg-gradient-to-b from-[#070714] via-[#0c0c2a] to-[#151538] relative flex flex-col items-center justify-center px-6 overflow-hidden">
+                  {/* Stars */}
+                  {[
+                    { top: "10%", left: "8%", s: 2 }, { top: "18%", left: "82%", s: 1.5 },
+                    { top: "30%", left: "15%", s: 1 }, { top: "22%", left: "70%", s: 2.5 },
+                    { top: "65%", left: "88%", s: 1 }, { top: "75%", left: "6%", s: 1.5 },
+                    { top: "50%", left: "25%", s: 1 }, { top: "40%", left: "60%", s: 2 },
+                  ].map((st, i) => (
+                    <motion.div key={i} className="absolute rounded-full bg-white" style={{ top: st.top, left: st.left, width: st.s, height: st.s }}
+                      animate={{ opacity: [0, 0.8, 0.2, 0.9, 0] }}
+                      transition={{ delay: i * 0.3, duration: 3 + i * 0.4, repeat: Infinity, ease: "easeInOut" }}
+                    />
+                  ))}
+                  <motion.div initial={{ scale: 0.8, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} transition={{ delay: 0.2, type: "spring" }}
+                    className="inline-flex items-center justify-center w-14 h-14 bg-gradient-to-br from-indigo-400 to-purple-500 rounded-full mb-4 shadow-[0_0_40px_rgba(129,140,248,0.3)]"
+                  >
+                    <Sparkles size={24} className="text-white" />
+                  </motion.div>
+                  <p className="text-[9px] font-black tracking-[0.4em] uppercase mb-2 text-indigo-300">The Signature</p>
+                  <h2 className="text-xl italic font-bold tracking-tight text-white mb-3">{user?.nickname}님의 시그니처</h2>
+
+                  {d?.aura && (
+                    <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.3 }}
+                      className={`bg-gradient-to-r ${d.aura.gradient} rounded-2xl p-4 text-center shadow-lg w-full max-w-[280px] mt-2`}
+                    >
+                      <p className="text-[9px] font-black uppercase tracking-[0.4em] text-white/70 mb-1">Your Aura</p>
+                      <h4 className="text-lg font-black text-white mb-1">{d.aura.aura}</h4>
+                      <p className="text-[11px] text-white/80 leading-relaxed break-keep">{d.aura.description}</p>
+                    </motion.div>
+                  )}
+
+                  {d?.topValues && d.topValues.length > 0 && (
+                    <div className="w-full max-w-[280px] mt-4 space-y-1.5">
+                      {d.topValues.slice(0, 3).map((v, i) => {
+                        const pct = d.totalSpent > 0 ? Math.round((v.amount / d.totalSpent) * 100) : 0;
+                        return (
+                          <motion.div key={v.itemName} initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: 0.5 + i * 0.08 }}
+                            className="flex items-center gap-2"
+                          >
+                            <span className="text-indigo-400/60 text-[11px] font-bold w-4 text-right">{i + 1}</span>
+                            <div className="flex-1">
+                              <div className="flex justify-between items-center mb-0.5">
+                                <span className="text-[11px] font-bold text-white/90">{v.keyword}</span>
+                                <span className="text-[10px] text-indigo-300/70">{pct}%</span>
+                              </div>
+                              <div className="w-full h-1 bg-white/10 rounded-full overflow-hidden">
+                                <motion.div className="h-full bg-gradient-to-r from-indigo-400 to-purple-500 rounded-full"
+                                  initial={{ width: 0 }} animate={{ width: `${pct}%` }} transition={{ delay: 0.6 + i * 0.08, duration: 0.5 }}
+                                />
+                              </div>
+                            </div>
+                          </motion.div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              </SwiperSlide>
+
+              {/* Slide 1: Lone Pioneer */}
+              <SwiperSlide>
+                <div className="w-full h-full bg-[#070714] flex items-center justify-center px-5">
+                  <div className="w-full max-w-[360px] bg-white/95 backdrop-blur-xl rounded-3xl p-5 shadow-xl">
+                    <div className="flex items-center gap-2 mb-2">
+                      <Zap size={14} className="text-indigo-500" />
+                      <span className="text-[8px] font-black uppercase tracking-[0.3em] text-indigo-400">SCARCITY</span>
+                    </div>
+                    <h3 className="text-sm font-bold text-gray-900 mb-0.5">The Lone Pioneer</h3>
+                    <p className="text-[11px] text-gray-500 mb-3">절대 포기할 수 없는 내 가치관</p>
+                    {d && d.rareValues.length > 0 ? (
+                      <div className="space-y-2.5">
+                        {d.rareValues.map((rv, i) => {
+                          const ratio = Math.round((rv.bidderCount / rv.totalUsers) * 100);
+                          return (
+                            <motion.div key={rv.keyword} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 + i * 0.1 }}
+                              className="bg-indigo-50/80 border border-indigo-100 rounded-xl p-3"
+                            >
+                              <div className="flex items-center justify-between mb-1.5">
+                                <div className="flex items-center gap-1.5">
+                                  {rv.bidderCount <= 2 && <Crown size={11} className="text-indigo-500" />}
+                                  <span className="text-[13px] font-bold text-gray-900">{rv.keyword}</span>
+                                </div>
+                                <span className="text-[9px] font-bold text-indigo-500 bg-indigo-100 px-1.5 py-0.5 rounded-full">{rv.bidderCount}/{rv.totalUsers}명</span>
+                              </div>
+                              <p className="text-[11px] text-gray-600 mb-1.5 break-keep">{rv.fullName}</p>
+                              <div className="w-full h-1 bg-indigo-100 rounded-full overflow-hidden">
+                                <motion.div className={`h-full rounded-full ${rv.bidderCount <= 2 ? 'bg-gradient-to-r from-indigo-400 to-purple-400' : 'bg-indigo-300'}`}
+                                  initial={{ width: 0 }} animate={{ width: `${ratio}%` }} transition={{ delay: 0.3 + i * 0.1, duration: 0.5 }}
+                                />
+                              </div>
+                              <p className="text-[9px] text-indigo-400 mt-1.5">
+                                {rv.bidderCount <= 2 ? `전체 ${rv.totalUsers}명 중 오직 ${rv.bidderCount}명만 선택` : `참가자의 ${ratio}%가 선택`}
+                              </p>
+                            </motion.div>
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      <p className="text-sm text-gray-400 text-center py-6">데이터를 분석 중입니다</p>
+                    )}
+                  </div>
+                </div>
+              </SwiperSlide>
+
+              {/* Slide 2: Feedback */}
+              <SwiperSlide>
+                <div className="w-full h-full bg-[#070714] flex items-center justify-center px-5">
+                  <div className="w-full max-w-[360px] bg-white/95 backdrop-blur-xl rounded-3xl p-5 shadow-xl">
+                    <div className="flex items-center gap-2 mb-2">
+                      <Radio size={14} className="text-indigo-500" />
+                      <span className="text-[8px] font-black uppercase tracking-[0.3em] text-indigo-400">THE ECHO</span>
+                    </div>
+                    <h3 className="text-sm font-bold text-gray-900 mb-0.5">The Feedback</h3>
+                    <p className="text-[11px] text-gray-500 mb-3">대화 상대가 남긴 당신의 온도</p>
+                    {d && d.feedbacks.length > 0 ? (
+                      <div className="space-y-3">
+                        <div className="flex gap-1.5">
+                          {d.vibeBreakdown.map(v => {
+                            const info = VIBE_INFO[v.vibe];
+                            if (!info) return null;
+                            return (
+                              <div key={v.vibe} className="flex-1 bg-indigo-50/80 border border-indigo-100 rounded-lg p-2 text-center">
+                                <span className="text-base">{info.emoji}</span>
+                                <p className="text-sm font-black text-gray-900 mt-0.5">{v.count}</p>
+                                <p className="text-[8px] text-gray-500 break-keep">{info.label}</p>
+                              </div>
+                            );
+                          })}
+                        </div>
+                        {d.charmRanking.length > 0 && (
+                          <div className="flex flex-wrap gap-1.5">
+                            {d.charmRanking.map((c, i) => (
+                              <span key={c.charm}
+                                className={`px-2.5 py-1.5 rounded-full font-bold text-[11px] ${
+                                  i === 0 ? 'bg-gradient-to-r from-violet-500 to-purple-600 text-white' : 'bg-gray-100 text-gray-700 border border-gray-200'
+                                }`}
+                              >
+                                {c.charm} x{c.count}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                        {d.vibeBreakdown.some(v => v.vibe === "spark") ? (
+                          <div className="bg-gradient-to-r from-rose-50 to-pink-50 border border-rose-100 rounded-xl p-3 text-center">
+                            <p className="text-[11px] text-gray-700 leading-relaxed break-keep">당신만의 아우라가 누군가의 마음 한구석에 기분 좋은 파동을 일으켰네요.</p>
+                          </div>
+                        ) : (
+                          <div className="bg-gradient-to-r from-indigo-50 to-purple-50 border border-indigo-100 rounded-xl p-3 text-center">
+                            <p className="text-[10px] text-gray-600 leading-relaxed break-keep">짧은 시간 안에 서로의 결을 온전히 느끼긴 어려우니까요.</p>
+                            <p className="text-[11px] font-bold text-indigo-600 mt-1 break-keep">더 좋은 타이밍에 다시 인연을 찾아봐요</p>
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      <p className="text-sm text-gray-400 text-center py-6">아직 수집된 피드백이 없습니다</p>
+                    )}
+                  </div>
+                </div>
+              </SwiperSlide>
+
+              {/* Slide 3: Paradox */}
+              <SwiperSlide>
+                <div className="w-full h-full bg-[#070714] flex items-center justify-center px-5">
+                  <div className="w-full max-w-[360px] bg-white/95 backdrop-blur-xl rounded-3xl p-5 shadow-xl">
+                    <div className="flex items-center gap-2 mb-2">
+                      <Brain size={14} className="text-indigo-500" />
+                      <span className="text-[8px] font-black uppercase tracking-[0.3em] text-indigo-400">PARADOX</span>
+                    </div>
+                    <h3 className="text-sm font-bold text-gray-900 mb-0.5">Persona Paradox</h3>
+                    <p className="text-[11px] text-gray-500 mb-3">의도와 인상 사이, 반전 매력의 증명</p>
+                    {d && d.selfIdentity && d.perceivedCharm ? (
+                      <div className="space-y-3">
+                        <div className="grid grid-cols-[1fr_auto_1fr] items-stretch gap-2">
+                          <div className="bg-gradient-to-br from-indigo-50 to-purple-50 border border-indigo-100 rounded-xl p-3 text-center flex flex-col justify-center">
+                            <p className="text-[7px] font-black uppercase tracking-widest text-indigo-400 mb-1">내가 표현한 나</p>
+                            <p className="text-lg font-black text-indigo-700">{d.selfIdentity}</p>
+                            <p className="text-[8px] text-gray-500 mt-0.5">최고 입찰 가치관</p>
+                          </div>
+                          <div className="flex items-center text-gray-400 font-black text-[10px] shrink-0 px-0.5">VS</div>
+                          <div className="bg-gradient-to-br from-rose-50 to-pink-50 border border-rose-100 rounded-xl p-3 text-center flex flex-col justify-center">
+                            <p className="text-[7px] font-black uppercase tracking-widest text-rose-400 mb-1">상대가 느낀 나</p>
+                            <p className="text-lg font-black text-rose-600">{d.perceivedCharm}</p>
+                            <p className="text-[8px] text-gray-500 mt-0.5">가장 많이 받은 매력</p>
+                          </div>
+                        </div>
+                        <div className={`rounded-xl p-3 text-center ${d.isPardoxFound ? 'bg-gradient-to-r from-indigo-50 to-purple-50 border border-indigo-200' : 'bg-gray-50 border border-gray-100'}`}>
+                          {d.isPardoxFound ? (
+                            <>
+                              <Sparkles size={14} className="text-indigo-500 mx-auto mb-1.5" />
+                              <p className="text-[11px] font-bold text-indigo-700 mb-1.5">반전 매력 발견!</p>
+                              <p className="text-[10px] text-gray-600 leading-relaxed break-keep">
+                                당신의 세계는 &ldquo;{d.selfIdentity}&rdquo;이라는 명확한 방향을 향해 움직이고 있지만,
+                                그 여정 속에서 타인이 발견한 당신의 실루엣은 &ldquo;{d.perceivedCharm}&rdquo;만큼이나 입체적이었네요.
+                              </p>
+                              <p className="text-[10px] text-gray-600 leading-relaxed break-keep mt-1.5">
+                                이 두 가지 결이 만나 만드는 반전의 매력이
+                                오늘 이곳의 공기를 당신의 색깔로 물들였습니다.
+                              </p>
+                            </>
+                          ) : (
+                            <>
+                              <Heart size={14} className="text-gray-400 mx-auto mb-1.5" />
+                              <p className="text-[11px] font-bold text-gray-700 mb-1.5">흔들리지 않는 매력</p>
+                              <p className="text-[10px] text-gray-600 leading-relaxed break-keep">
+                                당신의 세계는 &ldquo;{d.selfIdentity}&rdquo;이라는 명확한 방향을 향해 움직이고 있지만,
+                                그 여정 속에서 타인이 발견한 당신의 실루엣은 &ldquo;{d.perceivedCharm}&rdquo;만큼이나 입체적이었네요.
+                              </p>
+                              <p className="text-[10px] text-gray-600 leading-relaxed break-keep mt-1.5">
+                                이 두 가지 결이 만나 만드는 반전의 매력이
+                                오늘 이곳의 공기를 당신의 색깔로 물들였습니다.
+                              </p>
+                            </>
+                          )}
+                        </div>
+                      </div>
+                    ) : (
+                      <p className="text-sm text-gray-400 text-center py-6">
+                        {!d?.selfIdentity ? "경매 데이터가 필요합니다" : "피드백 데이터가 필요합니다"}
+                      </p>
+                    )}
+                  </div>
+                </div>
+              </SwiperSlide>
+
+              {/* Slide 4: Instinct */}
+              <SwiperSlide>
+                <div className="w-full h-full bg-[#070714] flex items-center justify-center px-5">
+                  <div className="w-full max-w-[360px] bg-white/95 backdrop-blur-xl rounded-3xl p-5 shadow-xl">
+                    <div className="flex items-center gap-2 mb-2">
+                      <Users size={14} className="text-indigo-500" />
+                      <span className="text-[8px] font-black uppercase tracking-[0.3em] text-indigo-400">INSTINCT</span>
+                    </div>
+                    <h3 className="text-sm font-bold text-gray-900 mb-0.5">Subconscious Frequency</h3>
+                    <p className="text-[11px] text-gray-500 mb-3">당신의 본능이 향한 이상형 분석</p>
+                    {d && d.likedUserValues.length > 0 ? (
+                      <div className="space-y-3">
+                        <p className="text-[11px] text-gray-600 leading-relaxed break-keep">
+                          피드에서 하트를 보낸 <span className="text-indigo-500 font-bold">{d.totalLikes}번</span>의 선택을 분석한 결과입니다.
+                        </p>
+                        <div className="space-y-2">
+                          {d.likedUserValues.map((lv, i) => {
+                            const maxCount = d.likedUserValues[0]?.count || 1;
+                            const pct = Math.round((lv.count / maxCount) * 100);
+                            return (
+                              <motion.div key={lv.keyword} initial={{ opacity: 0, x: -8 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: 0.2 + i * 0.08 }}
+                                className="flex items-center gap-2.5"
+                              >
+                                <span className={`text-[11px] font-bold w-4 text-right ${i === 0 ? 'text-rose-500' : 'text-gray-400'}`}>{i + 1}</span>
+                                <div className="flex-1">
+                                  <div className="flex justify-between items-center mb-0.5">
+                                    <span className="text-[11px] font-bold text-gray-800 flex items-center gap-1">
+                                      {i === 0 && <Heart size={10} className="text-rose-400" fill="#fb7185" />}
+                                      {lv.keyword}
+                                    </span>
+                                  </div>
+                                  <div className="w-full h-1 bg-rose-100 rounded-full overflow-hidden">
+                                    <motion.div className={`h-full rounded-full ${i === 0 ? 'bg-gradient-to-r from-rose-400 to-pink-500' : 'bg-rose-200'}`}
+                                      initial={{ width: 0 }} animate={{ width: `${pct}%` }} transition={{ delay: 0.3 + i * 0.08, duration: 0.5 }}
+                                    />
+                                  </div>
+                                </div>
+                              </motion.div>
+                            );
+                          })}
+                        </div>
+                        {d.likedUserValues[0] && (
+                          <div className="bg-rose-50 border border-rose-100 rounded-xl p-2.5 text-center">
+                            <p className="text-[10px] text-gray-600 break-keep">
+                              당신의 본능은 <span className="text-rose-500 font-bold">&ldquo;{d.likedUserValues[0].keyword}&rdquo;</span>을 가진 사람에게 가장 강하게 반응합니다.
+                            </p>
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      <p className="text-sm text-gray-400 text-center py-6">피드 활동 데이터가 없습니다</p>
+                    )}
+                  </div>
+                </div>
+              </SwiperSlide>
+
+              {/* Slide 5: Closing */}
+              <SwiperSlide>
+                <div className="w-full h-full bg-gradient-to-b from-[#1a0f0a] via-[#2a1810] to-[#1a0f0a] flex flex-col items-center justify-center px-6 relative overflow-hidden">
+                  {[
+                    { top: "15%", left: "10%", s: 3 }, { top: "25%", left: "80%", s: 2 },
+                    { top: "60%", left: "15%", s: 2.5 }, { top: "70%", left: "85%", s: 2 },
+                  ].map((st, i) => (
+                    <motion.div key={i} className="absolute rounded-full bg-amber-300/30"
+                      style={{ top: st.top, left: st.left, width: st.s, height: st.s }}
+                      animate={{ opacity: [0, 0.6, 0.2, 0.7, 0] }}
+                      transition={{ delay: i * 0.4, duration: 3.5, repeat: Infinity, ease: "easeInOut" }}
+                    />
+                  ))}
+                  <motion.div initial={{ scale: 0.8, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} transition={{ delay: 0.2, type: "spring" }}
+                    className="inline-flex items-center justify-center w-12 h-12 bg-gradient-to-br from-amber-400 to-orange-500 rounded-full mb-5 shadow-[0_0_40px_rgba(251,191,36,0.2)]"
+                  >
+                    <Sparkles size={20} className="text-white" />
+                  </motion.div>
+                  <p className="text-[9px] font-black tracking-[0.4em] uppercase mb-3 text-amber-300/70">The Closing</p>
+                  <h2 className="text-lg font-bold text-white mb-4 leading-relaxed text-center">
+                    오늘 짧은 시간 동안 당신이 보여준 <br /> 반짝이는 조각들을 모아,<br /> 당신만의 이야기를 정성껏 적어보았어요.
+                  </h2>
+                  <div className="h-px w-10 bg-amber-400/30 mb-4" />
+                  <p className="text-[13px] text-amber-100/70 leading-loose break-keep text-center mb-1">
+                    '나한테 이런 모습이 있었나?' 싶은 낯선 발견이 있었나요? <br /> 아니면 역시나 싶은 다정한 나를 다시 한번 확인하셨나요?
+                  </p>
+                  <p className="text-[13px] text-amber-100/70 leading-loose break-keep text-center">
+                    오늘 경매에서 조금 다른 마음을 얹었다면, <br /> 결과지도 평소와는 조금 다를 수 있어요. <br /> 그저 오늘의 특별한 여행이었다고 생각해주세요! <br /><br />
+                    처음 보는 사람들과 낯선 공간에서 보낸 오늘이,<br /> 부디 당신의 마음 한구석에 예쁜 색깔로 칠해졌길 바라요.
+                  </p>
+                  <p className="text-[10px] text-amber-200/30 mt-6">Before We Meet</p>
+                </div>
+              </SwiperSlide>
+            </Swiper>
+          </div>
+
+          {/* ── Instagram Interaction Icons ── */}
+          <div className="flex items-center justify-between px-3 pt-2.5 pb-1">
+            <div className="flex items-center gap-4">
+              <button onClick={() => setIsLiked(!isLiked)} className="p-0.5">
+                <Heart size={24} className={isLiked ? "text-red-500 fill-red-500" : "text-gray-900"} strokeWidth={1.5} />
+              </button>
+              <button className="p-0.5 text-gray-900">
+                <MessageCircle size={24} strokeWidth={1.5} />
+              </button>
+              <button onClick={() => setIsShareOpen(true)} className="p-0.5 text-gray-900">
+                <Send size={24} strokeWidth={1.5} />
+              </button>
+            </div>
+            <button className="p-0.5 text-gray-900">
+              <Bookmark size={24} strokeWidth={1.5} />
+            </button>
+          </div>
+
+          {/* ── Instagram Caption ── */}
+          <div className="px-3.5 pb-6 pt-1">
+            <div className="max-h-[40dvh] sm:max-h-[200px] overflow-y-auto">
+              <p className="text-[13px] text-gray-900 leading-[1.7]">
+                <span className="font-semibold">{user?.nickname || "user"}</span>{" "}
+                <span className="text-gray-700 whitespace-pre-line">{captions[activeSlide]}</span>
+              </p>
+            </div>
+            <p className="text-[11px] text-gray-400 mt-2">{activeSlide + 1} / {TOTAL_SLIDES}</p>
+          </div>
+
+        </div>{/* end feed container */}
+      </div>
+
+      {/* ══════ Hidden Export Div (for PNG/PDF) ══════ */}
+      <div style={{ position: "absolute", left: "-9999px", top: 0 }} aria-hidden="true">
+        <div ref={reportRef} style={{ width: 420, background: "#FAF9F6", padding: "0 0 40px 0" }}>
+          <div style={{ background: "#070714", borderRadius: "0 0 2rem 2rem", padding: "48px 24px 32px", textAlign: "center" }}>
+            <p style={{ fontSize: 9, fontWeight: 900, letterSpacing: "0.4em", textTransform: "uppercase", color: "#a5b4fc", marginBottom: 8 }}>The Signature</p>
+            <h1 style={{ fontSize: 22, fontWeight: 700, fontStyle: "italic", color: "white", marginBottom: 8 }}>{user?.nickname}님의 시그니처</h1>
+            <p style={{ fontSize: 11, color: "rgba(165,180,252,0.5)", lineHeight: 1.6 }}>오늘 이 공간에서 당신이 증명한 가치를<br />가장 아름다운 방식으로 복원했습니다.</p>
+          </div>
+          <div style={{ padding: "16px 20px", display: "flex", flexDirection: "column", gap: 16 }}>
+            {d?.aura && (
+              <div style={{ background: "white", borderRadius: "1.5rem", padding: 20, border: "1px solid #e5e7eb" }}>
+                <p style={{ fontSize: 8, fontWeight: 900, letterSpacing: "0.3em", textTransform: "uppercase", color: "#818cf8", marginBottom: 8 }}>IDENTITY — The Aura Card</p>
+                <div style={{ background: "linear-gradient(135deg, #818cf8, #a855f7)", borderRadius: "1rem", padding: 16, textAlign: "center", marginBottom: 16 }}>
+                  <p style={{ fontSize: 9, fontWeight: 900, letterSpacing: "0.4em", textTransform: "uppercase", color: "rgba(255,255,255,0.7)", marginBottom: 4 }}>Your Aura</p>
+                  <p style={{ fontSize: 18, fontWeight: 900, color: "white", marginBottom: 4 }}>{d.aura.aura}</p>
+                  <p style={{ fontSize: 11, color: "rgba(255,255,255,0.8)" }}>{d.aura.description}</p>
+                </div>
                 {d.topValues.map((v, i) => {
                   const pct = d.totalSpent > 0 ? Math.round((v.amount / d.totalSpent) * 100) : 0;
                   return (
-                    <motion.div
-                      key={v.itemName}
-                      initial={{ opacity: 0, x: -10 }}
-                      animate={{ opacity: 1, x: 0 }}
-                      transition={{ delay: 0.5 + i * 0.08 }}
-                      className="flex items-center gap-3"
-                    >
-                      <span className="text-indigo-300 text-xs font-bold w-5 text-right">{i + 1}</span>
-                      <div className="flex-1">
-                        <div className="flex justify-between items-center mb-1">
-                          <span className="text-xs font-bold text-stone-800">{v.keyword}</span>
-                          <span className="text-[10px] text-stone-900">{pct}%</span>
+                    <div key={v.itemName} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+                      <span style={{ fontSize: 11, fontWeight: 700, color: "#a5b4fc", width: 16, textAlign: "right" }}>{i + 1}</span>
+                      <div style={{ flex: 1 }}>
+                        <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 2 }}>
+                          <span style={{ fontSize: 11, fontWeight: 700, color: "#292524" }}>{v.keyword}</span>
+                          <span style={{ fontSize: 10, color: "#57534e" }}>{pct}%</span>
                         </div>
-                        <div className="w-full h-1.5 bg-indigo-100 rounded-full overflow-hidden">
-                          <motion.div
-                            className="h-full bg-gradient-to-r from-indigo-400 to-purple-500 rounded-full"
-                            initial={{ width: 0 }}
-                            animate={{ width: `${pct}%` }}
-                            transition={{ delay: 0.6 + i * 0.08, duration: 0.5 }}
-                          />
+                        <div style={{ width: "100%", height: 5, background: "#e0e7ff", borderRadius: 4, overflow: "hidden" }}>
+                          <div style={{ width: `${pct}%`, height: "100%", background: "linear-gradient(90deg, #818cf8, #a855f7)", borderRadius: 4 }} />
                         </div>
                       </div>
-                    </motion.div>
-                  );
-                })}
-              </div>
-            </div>
-          ) : (
-            <p className="text-sm text-stone-900 text-center py-8">경매 데이터가 없습니다</p>
-          )}
-        </motion.div>
-
-        {/* ═══════ Section 2: The Lone Pioneer ═══════ */}
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.4 }}
-          className="bg-white/90 backdrop-blur-xl border border-white/60 rounded-[2rem] p-6 shadow-xl shadow-indigo-100/30"
-        >
-          <div className="flex items-center gap-2 mb-3">
-            <Zap size={16} className="text-indigo-500" />
-            <span className="text-[8px] font-sans font-black uppercase tracking-[0.3em] text-indigo-400">SCARCITY</span>
-          </div>
-          <h3 className="text-base font-bold text-stone-900 mb-1">The Lone Pioneer</h3>
-          <p className="text-xs text-stone-900 mb-0.5">절대 포기할 수 없는 내 가치관</p>
-          <p className="text-[10px] text-stone-800 mb-4">&ldquo;나는 어느 위치에?&rdquo;</p>
-
-          {d && d.rareValues.length > 0 ? (
-            <div className="space-y-3">
-              {d.rareValues.map((rv, i) => {
-                const ratio = Math.round((rv.bidderCount / rv.totalUsers) * 100);
-                return (
-                  <motion.div
-                    key={rv.keyword}
-                    initial={{ opacity: 0, y: 10 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ delay: 0.5 + i * 0.1 }}
-                    className="bg-indigo-50/80 border border-indigo-100 rounded-2xl p-4"
-                  >
-                    <div className="flex items-center justify-between mb-2">
-                      <div className="flex items-center gap-2">
-                        {rv.bidderCount <= 2 && <Crown size={12} className="text-indigo-500" />}
-                        <span className="text-sm font-bold text-stone-900">{rv.keyword}</span>
-                      </div>
-                      <span className="text-[10px] font-bold text-indigo-500 bg-indigo-100 px-2 py-0.5 rounded-full">
-                        {rv.bidderCount}/{rv.totalUsers}명
-                      </span>
-                    </div>
-                    <p className="text-xs text-stone-900 mb-2 break-keep">{rv.fullName}</p>
-                    <div className="w-full h-1.5 bg-indigo-100 rounded-full overflow-hidden">
-                      <motion.div
-                        className={`h-full rounded-full ${rv.bidderCount <= 2 ? 'bg-gradient-to-r from-indigo-400 to-purple-400' : 'bg-indigo-300'}`}
-                        initial={{ width: 0 }}
-                        animate={{ width: `${ratio}%` }}
-                        transition={{ delay: 0.6 + i * 0.1, duration: 0.5 }}
-                      />
-                    </div>
-                    <p className="text-[10px] text-indigo-400 mt-2">
-                      {rv.bidderCount <= 2
-                        ? `전체 ${rv.totalUsers}명 중 오직 ${rv.bidderCount}명만 선택`
-                        : `참가자의 ${ratio}%가 선택`
-                      }
-                    </p>
-                  </motion.div>
-                );
-              })}
-            </div>
-          ) : (
-            <p className="text-sm text-stone-900 text-center py-8">데이터를 분석 중입니다</p>
-          )}
-        </motion.div>
-
-        {/* ═══════ Section 3: The Feedback ═══════ */}
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.5 }}
-          className="bg-white/90 backdrop-blur-xl border border-white/60 rounded-[2rem] p-6 shadow-xl shadow-indigo-100/30"
-        >
-          <div className="flex items-center gap-2 mb-3">
-            <Radio size={16} className="text-indigo-500" />
-            <span className="text-[8px] font-sans font-black uppercase tracking-[0.3em] text-indigo-400">THE ECHO</span>
-          </div>
-          <h3 className="text-base font-bold text-stone-900 mb-1">The Feedback</h3>
-          <p className="text-xs text-stone-900 mb-4">대화 상대가 남긴 당신의 온도</p>
-
-          {d && d.feedbacks.length > 0 ? (
-            <div className="space-y-5">
-              {/* Vibe Summary */}
-              <div className="flex gap-2">
-                {d.vibeBreakdown.map(v => {
-                  const info = VIBE_INFO[v.vibe];
-                  if (!info) return null;
-                  return (
-                    <div key={v.vibe} className="flex-1 bg-indigo-50/80 border border-indigo-100 rounded-xl p-3 text-center">
-                      <span className="text-lg">{info.emoji}</span>
-                      <p className="text-base font-black text-stone-900 mt-1">{v.count}</p>
-                      <p className="text-[9px] text-stone-900 break-keep">{info.label}</p>
                     </div>
                   );
                 })}
               </div>
-
-              {/* Charm Keywords */}
-              {d.charmRanking.length > 0 && (
-                <div>
-                  <p className="text-[10px] font-sans font-black uppercase tracking-widest text-stone-900 mb-3">매력 키워드</p>
-                  <div className="flex flex-wrap gap-2">
+            )}
+            {d && d.rareValues.length > 0 && (
+              <div style={{ background: "white", borderRadius: "1.5rem", padding: 20, border: "1px solid #e5e7eb" }}>
+                <p style={{ fontSize: 8, fontWeight: 900, letterSpacing: "0.3em", textTransform: "uppercase", color: "#818cf8", marginBottom: 8 }}>SCARCITY — The Lone Pioneer</p>
+                {d.rareValues.map((rv) => (
+                  <div key={rv.keyword} style={{ background: "#eef2ff", borderRadius: "1rem", padding: 12, marginBottom: 8 }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
+                      <span style={{ fontSize: 13, fontWeight: 700, color: "#1a1a1a" }}>{rv.keyword}</span>
+                      <span style={{ fontSize: 10, fontWeight: 700, color: "#6366f1", background: "#e0e7ff", padding: "2px 8px", borderRadius: 12 }}>{rv.bidderCount}/{rv.totalUsers}명</span>
+                    </div>
+                    <p style={{ fontSize: 11, color: "#1a1a1a", marginBottom: 4 }}>{rv.fullName}</p>
+                  </div>
+                ))}
+              </div>
+            )}
+            {d && d.feedbacks.length > 0 && (
+              <div style={{ background: "white", borderRadius: "1.5rem", padding: 20, border: "1px solid #e5e7eb" }}>
+                <p style={{ fontSize: 8, fontWeight: 900, letterSpacing: "0.3em", textTransform: "uppercase", color: "#818cf8", marginBottom: 8 }}>THE ECHO — The Feedback</p>
+                <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+                  {d.vibeBreakdown.map(v => {
+                    const info = VIBE_INFO[v.vibe];
+                    if (!info) return null;
+                    return (
+                      <div key={v.vibe} style={{ flex: 1, background: "#eef2ff", borderRadius: "0.75rem", padding: 10, textAlign: "center" }}>
+                        <span style={{ fontSize: 16 }}>{info.emoji}</span>
+                        <p style={{ fontSize: 14, fontWeight: 900, color: "#1a1a1a", marginTop: 4 }}>{v.count}</p>
+                        <p style={{ fontSize: 9, color: "#1a1a1a" }}>{info.label}</p>
+                      </div>
+                    );
+                  })}
+                </div>
+                {d.charmRanking.length > 0 && (
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
                     {d.charmRanking.map((c, i) => (
-                      <motion.div
-                        key={c.charm}
-                        initial={{ opacity: 0, scale: 0.8 }}
-                        animate={{ opacity: 1, scale: 1 }}
-                        transition={{ delay: 0.6 + i * 0.08 }}
-                        className={`px-3 py-2 rounded-full font-bold text-xs flex items-center gap-1.5 ${
-                          i === 0
-                            ? 'bg-gradient-to-r from-violet-500 to-purple-600 text-white shadow-md shadow-purple-200/50'
-                            : 'bg-stone-100 text-stone-800 border border-stone-200'
-                        }`}
-                      >
-                        {i === 0 && <Crown size={12} />}
-                        {c.charm}
-                        <span className={`text-[10px] ${i === 0 ? 'text-white/60' : 'text-stone-900'}`}>x{c.count}</span>
-                      </motion.div>
+                      <span key={c.charm} style={{ fontSize: 11, fontWeight: 700, padding: "4px 10px", borderRadius: 16, background: i === 0 ? "linear-gradient(90deg, #8b5cf6, #9333ea)" : "#f5f5f4", color: i === 0 ? "white" : "#292524", border: i === 0 ? "none" : "1px solid #d6d3d1" }}>
+                        {c.charm} x{c.count}
+                      </span>
                     ))}
                   </div>
-                </div>
-              )}
-
-              <p className="text-[10px] text-stone-900 text-center">
-                총 {d.feedbacks.length}명의 대화 상대가 평가
-              </p>
-
-              {/* spark 있을 때: 연결 유도 */}
-              {d.vibeBreakdown.some(v => v.vibe === "spark") ? (
-                <motion.div
-                  initial={{ opacity: 0, y: 8 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: 0.8 }}
-                  className="bg-gradient-to-r from-rose-50 to-pink-50 border border-rose-100 rounded-2xl p-5 text-center"
-                >
-                  <p className="text-xs text-stone-800 leading-relaxed break-keep">
-                    이 공간에서 당신은 누군가의<br />심장을 뛰게 했어요.
-                  </p>
-                  <p className="text-[10px] text-rose-500 font-bold mt-2 break-keep">
-                    그분과의 연결을 원하면 주최자에게 알려주세요.
-                  </p>
-                </motion.div>
-              ) : (
-                /* 재방문 유도: spark 없이 calm/cold만 있을 때 */
-                <motion.div
-                  initial={{ opacity: 0, y: 8 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: 0.8 }}
-                  className="bg-gradient-to-r from-indigo-50 to-purple-50 border border-indigo-100 rounded-2xl p-5 text-center"
-                >
-                  <p className="text-[10px] text-stone-900 leading-relaxed break-keep mb-2">
-                    불꽃이 없었던 건 매력이 부족해서가 아니에요.<br />
-                    짧은 시간 안에 서로의 결을 온전히 느끼긴 어려우니까요.
-                  </p>
-                  <p className="text-xs font-bold text-indigo-600 break-keep">
-                    더 좋은 타이밍에 다시 인연을 찾아봐요
-                  </p>
-                </motion.div>
-              )}
-            </div>
-          ) : (
-            <p className="text-sm text-stone-900 text-center py-8">아직 수집된 피드백이 없습니다</p>
-          )}
-        </motion.div>
-
-        {/* ═══════ Section 4: Persona Paradox ═══════ */}
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.6 }}
-          className="bg-white/90 backdrop-blur-xl border border-white/60 rounded-[2rem] p-6 shadow-xl shadow-indigo-100/30"
-        >
-          <div className="flex items-center gap-2 mb-3">
-            <Brain size={16} className="text-indigo-500" />
-            <span className="text-[8px] font-sans font-black uppercase tracking-[0.3em] text-indigo-400">PARADOX</span>
-          </div>
-          <h3 className="text-base font-bold text-stone-900 mb-1">Persona Paradox</h3>
-          <p className="text-xs text-stone-900 mb-4">의도와 인상 사이, 반전 매력의 증명</p>
-
-          {d && d.selfIdentity && d.perceivedCharm ? (
-            <div className="space-y-4">
-              {/* VS Card — grid로 양쪽 동일 크기 */}
-              <div className="grid grid-cols-[1fr_auto_1fr] items-stretch gap-2.5">
-                {/* Self */}
-                <div className="bg-gradient-to-br from-indigo-50 to-purple-50 border border-indigo-100 rounded-2xl p-4 text-center flex flex-col justify-center">
-                  <p className="text-[8px] font-sans font-black uppercase tracking-widest text-indigo-400 mb-1.5">내가 표현한 나</p>
-                  <p className="text-xl font-black text-indigo-700">{d.selfIdentity}</p>
-                  <p className="text-[9px] text-stone-900 mt-1">최고 입찰 가치관</p>
-                </div>
-
-                <div className="flex items-center text-stone-900 font-black text-[10px] shrink-0 px-0.5">VS</div>
-
-                {/* Perceived */}
-                <div className="bg-gradient-to-br from-rose-50 to-pink-50 border border-rose-100 rounded-2xl p-4 text-center flex flex-col justify-center">
-                  <p className="text-[8px] font-sans font-black uppercase tracking-widest text-rose-400 mb-1.5">상대가 느낀 나</p>
-                  <p className="text-xl font-black text-rose-600">{d.perceivedCharm}</p>
-                  <p className="text-[9px] text-stone-900 mt-1">가장 많이 받은 매력</p>
-                </div>
-              </div>
-
-              {/* Verdict */}
-              <div className={`rounded-2xl p-4 text-center ${d.isPardoxFound ? 'bg-gradient-to-r from-indigo-50 to-purple-50 border border-indigo-200' : 'bg-stone-50 border border-stone-100'}`}>
-                {d.isPardoxFound ? (
-                  <>
-                    <Sparkles size={16} className="text-indigo-500 mx-auto mb-2" />
-                    <p className="text-xs font-bold text-indigo-700 mb-2">반전 매력 발견!</p>
-                    <p className="text-[10px] text-stone-900 leading-relaxed break-keep">
-                      당신은 경매에서 &ldquo;{d.selfIdentity}&rdquo;에 가장 많은 코인을 걸었습니다.<br />
-                      하지만 대화 상대들은 당신에게서 &ldquo;{d.perceivedCharm}&rdquo;을 가장 강하게 느꼈어요.
-                    </p>
-                    <p className="text-[10px] text-stone-900 leading-relaxed break-keep mt-2">
-                      스스로 의식하지 못한 매력이 대화 속에서 자연스럽게 드러난 거예요.<br />
-                      이 의외의 갭이야말로 사람을 끌어당기는 가장 강력한 무기입니다.
-                    </p>
-                  </>
-                ) : (
-                  <>
-                    <Heart size={16} className="text-stone-900 mx-auto mb-2" />
-                    <p className="text-xs font-bold text-stone-800 mb-2">흔들리지 않는 매력</p>
-                    <p className="text-[10px] text-stone-900 leading-relaxed break-keep">
-                      당신이 중요하게 여기는 가치 &ldquo;{d.selfIdentity}&rdquo;과<br />
-                      상대방이 실제로 느낀 인상 &ldquo;{d.perceivedCharm}&rdquo;이 같은 결을 가리킵니다.
-                    </p>
-                    <p className="text-[10px] text-stone-900 leading-relaxed break-keep mt-2">
-                      꾸미지 않아도 자연스럽게 전해지는 진정성 —<br />
-                      그게 가장 오래 기억에 남는 매력이에요.
-                    </p>
-                  </>
                 )}
               </div>
-            </div>
-          ) : (
-            <p className="text-sm text-stone-900 text-center py-8">
-              {!d?.selfIdentity ? "경매 데이터가 필요합니다" : "피드백 데이터가 필요합니다"}
-            </p>
-          )}
-        </motion.div>
-
-        {/* ═══════ Section 5: Subconscious Frequency ═══════ */}
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.7 }}
-          className="bg-white/90 backdrop-blur-xl border border-white/60 rounded-[2rem] p-6 shadow-xl shadow-indigo-100/30"
-        >
-          <div className="flex items-center gap-2 mb-3">
-            <Users size={16} className="text-indigo-500" />
-            <span className="text-[8px] font-sans font-black uppercase tracking-[0.3em] text-indigo-400">INSTINCT</span>
-          </div>
-          <h3 className="text-base font-bold text-stone-900 mb-1">Subconscious Frequency</h3>
-          <p className="text-xs text-stone-900 mb-4">당신의 본능이 향한 이상형 분석</p>
-
-          {d && d.likedUserValues.length > 0 ? (
-            <div className="space-y-5">
-              <p className="text-xs text-stone-900 leading-relaxed break-keep">
-                피드에서 하트를 보낸 <span className="text-indigo-500 font-bold">{d.totalLikes}번</span>의 선택을 분석한 결과,
-                당신의 무의식이 끌린 가치관 패턴입니다.
-              </p>
-
-              <div className="space-y-2.5">
+            )}
+            {d && d.selfIdentity && d.perceivedCharm && (
+              <div style={{ background: "white", borderRadius: "1.5rem", padding: 20, border: "1px solid #e5e7eb" }}>
+                <p style={{ fontSize: 8, fontWeight: 900, letterSpacing: "0.3em", textTransform: "uppercase", color: "#818cf8", marginBottom: 8 }}>PARADOX — Persona Paradox</p>
+                <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+                  <div style={{ flex: 1, background: "#eef2ff", borderRadius: "1rem", padding: 12, textAlign: "center" }}>
+                    <p style={{ fontSize: 8, fontWeight: 900, letterSpacing: "0.2em", textTransform: "uppercase", color: "#818cf8", marginBottom: 4 }}>내가 표현한 나</p>
+                    <p style={{ fontSize: 18, fontWeight: 900, color: "#4338ca" }}>{d.selfIdentity}</p>
+                  </div>
+                  <div style={{ display: "flex", alignItems: "center", fontWeight: 900, fontSize: 10, color: "#1a1a1a" }}>VS</div>
+                  <div style={{ flex: 1, background: "#fff1f2", borderRadius: "1rem", padding: 12, textAlign: "center" }}>
+                    <p style={{ fontSize: 8, fontWeight: 900, letterSpacing: "0.2em", textTransform: "uppercase", color: "#fb7185", marginBottom: 4 }}>상대가 느낀 나</p>
+                    <p style={{ fontSize: 18, fontWeight: 900, color: "#e11d48" }}>{d.perceivedCharm}</p>
+                  </div>
+                </div>
+              </div>
+            )}
+            {d && d.likedUserValues.length > 0 && (
+              <div style={{ background: "white", borderRadius: "1.5rem", padding: 20, border: "1px solid #e5e7eb" }}>
+                <p style={{ fontSize: 8, fontWeight: 900, letterSpacing: "0.3em", textTransform: "uppercase", color: "#818cf8", marginBottom: 8 }}>INSTINCT — Subconscious Frequency</p>
                 {d.likedUserValues.map((lv, i) => {
                   const maxCount = d.likedUserValues[0]?.count || 1;
                   const pct = Math.round((lv.count / maxCount) * 100);
                   return (
-                    <motion.div
-                      key={lv.keyword}
-                      initial={{ opacity: 0, x: -10 }}
-                      animate={{ opacity: 1, x: 0 }}
-                      transition={{ delay: 0.8 + i * 0.08 }}
-                      className="flex items-center gap-3"
-                    >
-                      <span className={`text-xs font-bold w-5 text-right ${i === 0 ? 'text-rose-500' : 'text-stone-900'}`}>{i + 1}</span>
-                      <div className="flex-1">
-                        <div className="flex justify-between items-center mb-1">
-                          <span className="text-xs font-bold text-stone-800 flex items-center gap-1.5">
-                            {i === 0 && <Heart size={11} className="text-rose-400" fill="#fb7185" />}
-                            {lv.keyword}
-                          </span>
-                          <span className="text-[10px] text-stone-900">{lv.count}명</span>
+                    <div key={lv.keyword} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+                      <span style={{ fontSize: 11, fontWeight: 700, color: i === 0 ? "#f43f5e" : "#1a1a1a", width: 16, textAlign: "right" }}>{i + 1}</span>
+                      <div style={{ flex: 1 }}>
+                        <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 2 }}>
+                          <span style={{ fontSize: 11, fontWeight: 700, color: "#292524" }}>{lv.keyword}</span>
+                          <span style={{ fontSize: 10, color: "#1a1a1a" }}>{lv.count}명</span>
                         </div>
-                        <div className="w-full h-1.5 bg-rose-100 rounded-full overflow-hidden">
-                          <motion.div
-                            className={`h-full rounded-full ${i === 0 ? 'bg-gradient-to-r from-rose-400 to-pink-500' : 'bg-rose-200'}`}
-                            initial={{ width: 0 }}
-                            animate={{ width: `${pct}%` }}
-                            transition={{ delay: 0.9 + i * 0.08, duration: 0.5 }}
-                          />
+                        <div style={{ width: "100%", height: 5, background: "#ffe4e6", borderRadius: 4, overflow: "hidden" }}>
+                          <div style={{ width: `${pct}%`, height: "100%", background: i === 0 ? "linear-gradient(90deg, #fb7185, #ec4899)" : "#fecdd3", borderRadius: 4 }} />
                         </div>
                       </div>
-                    </motion.div>
+                    </div>
                   );
                 })}
               </div>
-
-              {d.likedUserValues[0] && (
-                <div className="bg-rose-50 border border-rose-100 rounded-2xl p-3.5 text-center">
-                  <p className="text-[10px] text-stone-900 break-keep">
-                    당신의 본능은 <span className="text-rose-500 font-bold">&ldquo;{d.likedUserValues[0].keyword}&rdquo;</span>을
-                    가진 사람에게 가장 강하게 반응합니다.
-                  </p>
-                </div>
-              )}
+            )}
+            <div style={{ textAlign: "center", padding: "24px 16px" }}>
+              <p style={{ fontSize: 12, color: "#57534e", lineHeight: 1.8 }}>오늘 짧은 시간 동안 당신이 보여준 반짝이는 조각들을 모아, 당신만의 이야기를 정성껏 적어보았어요.</p>
+              <p style={{ fontSize: 10, color: "#a8a29e", marginTop: 8 }}>Before We Meet Live</p>
             </div>
-          ) : (
-            <p className="text-sm text-stone-900 text-center py-8">피드 활동 데이터가 없습니다</p>
-          )}
-        </motion.div>
-
-        </section>
+          </div>
         </div>
+      </div>
 
-        {/* Share Button */}
-        <section className="max-w-xl mx-auto px-5 pt-4 pb-6">
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.8 }}
-          >
-            <motion.button
-              onClick={() => setIsShareOpen(true)}
-              className="w-full py-4 bg-gradient-to-r from-violet-500 to-purple-600 text-white rounded-[2rem] font-bold text-xs flex items-center justify-center gap-2 shadow-lg shadow-purple-200/50"
-              whileHover={{ scale: 1.02 }}
-              whileTap={{ scale: 0.98 }}
+      {/* ══════ Share Bottom Sheet ══════ */}
+      <AnimatePresence>
+        {isShareOpen && (
+          <>
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+              className="fixed inset-0 bg-black/40 z-50" onClick={() => setIsShareOpen(false)}
+            />
+            <motion.div
+              initial={{ y: "100%" }} animate={{ y: 0 }} exit={{ y: "100%" }}
+              transition={{ type: "spring", damping: 25, stiffness: 300 }}
+              className="fixed bottom-0 left-0 right-0 z-50 bg-white border-t border-gray-200 rounded-t-3xl px-6 pt-5 pb-8"
             >
-              <Share2 size={16} />
-              공유하기
-            </motion.button>
-          </motion.div>
-        </section>
-
-        {/* Share Bottom Sheet */}
-        <AnimatePresence>
-          {isShareOpen && (
-            <>
-              <motion.div
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                exit={{ opacity: 0 }}
-                className="fixed inset-0 bg-black/40 z-50"
-                onClick={() => setIsShareOpen(false)}
-              />
-              <motion.div
-                initial={{ y: "100%" }}
-                animate={{ y: 0 }}
-                exit={{ y: "100%" }}
-                transition={{ type: "spring", damping: 25, stiffness: 300 }}
-                className="fixed bottom-0 left-0 right-0 z-50 bg-white border-t border-stone-200 rounded-t-3xl px-6 pt-5 pb-8"
-              >
-                <div className="w-10 h-1 bg-stone-200 rounded-full mx-auto mb-5" />
-                <div className="flex items-center justify-between mb-5">
-                  <h3 className="text-base font-bold text-stone-900">공유하기</h3>
-                  <button onClick={() => setIsShareOpen(false)} className="text-stone-900 p-1">
-                    <X size={20} />
-                  </button>
-                </div>
-
-                <div className="space-y-3">
-                  {/* URL 복사 */}
-                  <motion.button
-                    onClick={async () => {
-                      setIsLoadingShare(true);
-                      try {
-                        const res = await fetch(`/api/report/${userId}`);
-                        const data = await res.json();
-                        let token = data.success && data.snapshots?.signature?.share_token;
-
-                        if (!token && reportData) {
-                          const postRes = await fetch(`/api/report/${userId}`, {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ snapshot_data: reportData, user }),
-                          });
-                          const postData = await postRes.json();
-                          if (postData.success) token = postData.share_token;
-                        }
-
-                        if (token) {
-                          const url = `${window.location.origin}/share/${token}`;
-                          setShareUrl(url);
-                          await navigator.clipboard.writeText(url);
-                          setIsCopied(true);
-                          setTimeout(() => { setIsCopied(false); setIsShareOpen(false); }, 1500);
-                        } else {
-                          alert("공유 링크를 생성할 수 없습니다.");
-                        }
-                      } catch {
-                        alert("공유 링크 생성 중 오류가 발생했습니다.");
-                      } finally {
-                        setIsLoadingShare(false);
-                      }
-                    }}
-                    disabled={isLoadingShare}
-                    className="w-full flex items-center gap-4 p-4 bg-stone-50 border border-stone-100 rounded-2xl text-left disabled:opacity-50"
-                    whileTap={{ scale: 0.98 }}
-                  >
-                    <div className="w-10 h-10 bg-indigo-100 rounded-full flex items-center justify-center shrink-0">
-                      {isLoadingShare ? <Loader2 size={18} className="text-indigo-500 animate-spin" /> :
-                       isCopied ? <Check size={18} className="text-emerald-500" /> :
-                       <Link size={18} className="text-indigo-500" />}
-                    </div>
-                    <div>
-                      <p className="text-sm font-bold text-stone-900">{isCopied ? "링크가 복사되었습니다!" : "URL 복사하기"}</p>
-                      <p className="text-xs text-stone-900 mt-0.5">링크를 통해 누구나 볼 수 있어요</p>
-                    </div>
-                  </motion.button>
-
-                  {/* 이미지 저장 */}
-                  <motion.button
-                    onClick={async () => {
-                      if (!reportRef.current) return;
-                      setIsSavingImage(true);
-                      try {
-                        const dataUrl = await toPng(reportRef.current, {
-                          backgroundColor: "#FAF9F6",
-                          pixelRatio: 2,
-                          filter: (node) => {
-                            if (node instanceof HTMLElement && node.getAttribute?.("aria-hidden") === "true") return false;
-                            return true;
-                          },
+              <div className="w-10 h-1 bg-gray-200 rounded-full mx-auto mb-5" />
+              <div className="flex items-center justify-between mb-5">
+                <h3 className="text-base font-semibold text-gray-900">공유하기</h3>
+                <button onClick={() => setIsShareOpen(false)} className="text-gray-500 p-1"><X size={20} /></button>
+              </div>
+              <div className="space-y-3">
+                {/* URL 복사 */}
+                <motion.button
+                  onClick={async () => {
+                    setIsLoadingShare(true);
+                    try {
+                      const res = await fetch(`/api/report/${userId}`);
+                      const data = await res.json();
+                      let token = data.success && data.snapshots?.signature?.share_token;
+                      if (!token && reportData) {
+                        const postRes = await fetch(`/api/report/${userId}`, {
+                          method: 'POST', headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({ snapshot_data: reportData, user }),
                         });
-                        const link = document.createElement("a");
-                        link.download = `${user?.nickname || "signature"}_report.png`;
-                        link.href = dataUrl;
-                        link.click();
-                        setTimeout(() => setIsShareOpen(false), 500);
-                      } catch {
-                        alert("이미지 저장 중 오류가 발생했습니다.");
-                      } finally {
-                        setIsSavingImage(false);
+                        const postData = await postRes.json();
+                        if (postData.success) token = postData.share_token;
                       }
-                    }}
-                    disabled={isSavingImage}
-                    className="w-full flex items-center gap-4 p-4 bg-stone-50 border border-stone-100 rounded-2xl text-left disabled:opacity-50"
-                    whileTap={{ scale: 0.98 }}
-                  >
-                    <div className="w-10 h-10 bg-indigo-100 rounded-full flex items-center justify-center shrink-0">
-                      {isSavingImage ? <Loader2 size={18} className="text-indigo-500 animate-spin" /> :
-                       <Download size={18} className="text-indigo-500" />}
-                    </div>
-                    <div>
-                      <p className="text-sm font-bold text-stone-900">사진으로 저장하기</p>
-                      <p className="text-xs text-stone-900 mt-0.5">리포트를 이미지로 다운로드</p>
-                    </div>
-                  </motion.button>
-                </div>
-              </motion.div>
-            </>
-          )}
-        </AnimatePresence>
+                      if (token) {
+                        const url = `${window.location.origin}/share/${token}`;
+                        setShareUrl(url);
+                        await navigator.clipboard.writeText(url);
+                        setIsCopied(true);
+                        setTimeout(() => { setIsCopied(false); setIsShareOpen(false); }, 1500);
+                      } else { alert("공유 링크를 생성할 수 없습니다."); }
+                    } catch { alert("공유 링크 생성 중 오류가 발생했습니다."); } finally { setIsLoadingShare(false); }
+                  }}
+                  disabled={isLoadingShare}
+                  className="w-full flex items-center gap-4 p-4 bg-gray-50 border border-gray-100 rounded-2xl text-left disabled:opacity-50"
+                  whileTap={{ scale: 0.98 }}
+                >
+                  <div className="w-10 h-10 bg-indigo-100 rounded-full flex items-center justify-center shrink-0">
+                    {isLoadingShare ? <Loader2 size={18} className="text-indigo-500 animate-spin" /> :
+                     isCopied ? <Check size={18} className="text-emerald-500" /> :
+                     <Link size={18} className="text-indigo-500" />}
+                  </div>
+                  <div>
+                    <p className="text-sm font-semibold text-gray-900">{isCopied ? "링크가 복사되었습니다!" : "URL 복사하기"}</p>
+                    <p className="text-xs text-gray-500 mt-0.5">링크를 통해 누구나 볼 수 있어요</p>
+                  </div>
+                </motion.button>
+                {/* 이미지 저장 */}
+                <motion.button
+                  onClick={async () => {
+                    if (!reportRef.current) return;
+                    setIsSavingImage(true);
+                    try {
+                      const dataUrl = await toPng(reportRef.current, { backgroundColor: "#FAF9F6", pixelRatio: 2, filter: (node) => { if (node instanceof HTMLElement && node.getAttribute?.("aria-hidden") === "true") return false; return true; } });
+                      const link = document.createElement("a");
+                      link.download = `${user?.nickname || "signature"}_report.png`;
+                      link.href = dataUrl; link.click();
+                      setTimeout(() => setIsShareOpen(false), 500);
+                    } catch { alert("이미지 저장 중 오류가 발생했습니다."); } finally { setIsSavingImage(false); }
+                  }}
+                  disabled={isSavingImage}
+                  className="w-full flex items-center gap-4 p-4 bg-gray-50 border border-gray-100 rounded-2xl text-left disabled:opacity-50"
+                  whileTap={{ scale: 0.98 }}
+                >
+                  <div className="w-10 h-10 bg-indigo-100 rounded-full flex items-center justify-center shrink-0">
+                    {isSavingImage ? <Loader2 size={18} className="text-indigo-500 animate-spin" /> : <Download size={18} className="text-indigo-500" />}
+                  </div>
+                  <div>
+                    <p className="text-sm font-semibold text-gray-900">사진으로 저장하기</p>
+                    <p className="text-xs text-gray-500 mt-0.5">리포트를 이미지로 다운로드</p>
+                  </div>
+                </motion.button>
+                {/* PDF 저장 */}
+                <motion.button
+                  onClick={async () => {
+                    if (!reportRef.current) return;
+                    setIsSavingPdf(true);
+                    try {
+                      const dataUrl = await toPng(reportRef.current, { backgroundColor: "#FAF9F6", pixelRatio: 2, filter: (node) => { if (node instanceof HTMLElement && node.getAttribute?.("aria-hidden") === "true") return false; return true; } });
+                      const img = new Image(); img.src = dataUrl;
+                      await new Promise<void>((resolve) => { img.onload = () => resolve(); });
+                      const pdfWidth = 210; const pdfHeight = (img.height * pdfWidth) / img.width;
+                      const pdf = new jsPDF({ orientation: pdfHeight > pdfWidth ? "portrait" : "landscape", unit: "mm", format: [pdfWidth, pdfHeight] });
+                      pdf.addImage(dataUrl, "PNG", 0, 0, pdfWidth, pdfHeight);
+                      pdf.save(`${user?.nickname || "signature"}_report.pdf`);
+                      setTimeout(() => setIsShareOpen(false), 500);
+                    } catch { alert("PDF 저장 중 오류가 발생했습니다."); } finally { setIsSavingPdf(false); }
+                  }}
+                  disabled={isSavingPdf}
+                  className="w-full flex items-center gap-4 p-4 bg-gray-50 border border-gray-100 rounded-2xl text-left disabled:opacity-50"
+                  whileTap={{ scale: 0.98 }}
+                >
+                  <div className="w-10 h-10 bg-indigo-100 rounded-full flex items-center justify-center shrink-0">
+                    {isSavingPdf ? <Loader2 size={18} className="text-indigo-500 animate-spin" /> : <FileText size={18} className="text-indigo-500" />}
+                  </div>
+                  <div>
+                    <p className="text-sm font-semibold text-gray-900">PDF로 저장하기</p>
+                    <p className="text-xs text-gray-500 mt-0.5">리포트를 PDF 파일로 다운로드</p>
+                  </div>
+                </motion.button>
+              </div>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
