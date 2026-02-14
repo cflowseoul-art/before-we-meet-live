@@ -49,7 +49,7 @@ export default function ReportLoading({ params }: { params: Promise<{ id: string
     >
       <motion.div
         className="w-12 h-[1px] mx-auto mb-8 opacity-30"
-        style={{ backgroundColor: colors.accent }}
+        style={{ backgroundColor: "#7DD3FC" }}
         initial={{ scaleX: 0 }}
         animate={{ scaleX: 1 }}
         transition={{ duration: 0.8, ease: transitions.default.ease }}
@@ -63,7 +63,7 @@ export default function ReportLoading({ params }: { params: Promise<{ id: string
       >
         <motion.div
           className="w-12 h-12 border-2 rounded-full"
-          style={{ borderColor: colors.soft, borderTopColor: colors.accent }}
+          style={{ borderColor: colors.soft, borderTopColor: "#38BDF8" }}
           animate={{ rotate: 360 }}
           transition={{ repeat: Infinity, duration: 1, ease: "linear" }}
         />
@@ -98,7 +98,7 @@ export default function ReportLoading({ params }: { params: Promise<{ id: string
           <motion.div
             key={i}
             className="w-2 h-2 rounded-full"
-            style={{ backgroundColor: step >= i ? colors.accent : colors.soft }}
+            style={{ backgroundColor: step >= i ? "#38BDF8" : colors.soft }}
             animate={{ scale: step === i ? 1.3 : 1 }}
             transition={{ duration: 0.3 }}
           />
