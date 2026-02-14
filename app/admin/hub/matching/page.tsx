@@ -6,7 +6,7 @@ import { useAdminSession } from "@/lib/contexts/admin-session-context";
 import { AnimatePresence } from "framer-motion";
 import { useRouter } from "next/navigation";
 import {
-  Loader2, Play, RotateCcw, Heart, Trophy, Users, StopCircle, FileText
+  Loader2, Play, RotateCcw, Heart, Trophy, Users, StopCircle
 } from "lucide-react";
 import { parseDriveFileName } from "@/lib/utils/feed-parser";
 
@@ -328,11 +328,33 @@ function FeedTab() {
   }, [fetchFeedData, ctx.sessionDate, ctx.sessionNum]);
 
   const handleEndFeed = async () => {
-    if (!confirm("피드를 종료하고 리포트 단계로 전환하시겠습니까?")) return;
+    if (!confirm("피드를 종료하고 리포트 단계로 전환하시겠습니까?\n(매칭 확정 → 리포트 전환이 자동 실행됩니다)")) return;
     setIsEnding(true);
-    const ok = await ctx.changePhase("report");
-    setIsEnding(false);
-    if (ok) router.push("/admin/hub/reports");
+    try {
+      // 1. 매칭 확정 먼저 실행
+      const sessionId = `${ctx.sessionDate}_${ctx.sessionNum}`;
+      const matchRes = await fetch("/api/admin/finalize-matches", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sessionId }),
+      });
+      const matchData = await matchRes.json();
+      if (!matchData.success) {
+        alert(`매칭 확정 실패: ${matchData.error || "알 수 없는 오류"}`);
+        setIsEnding(false);
+        return;
+      }
+      // 2. 매칭 성공 후 phase 전환
+      const ok = await ctx.changePhase("report");
+      setIsEnding(false);
+      if (ok) {
+        alert(`매칭 완료! ${matchData.matches_created}개 생성 → 리포트 단계로 전환합니다.`);
+        router.push("/admin/hub/reports");
+      }
+    } catch (err: any) {
+      alert(`오류: ${err.message}`);
+      setIsEnding(false);
+    }
   };
 
   if (isLoading) return <div className="flex justify-center py-20"><Loader2 className="animate-spin" style={{ color: C.accent }} size={24} /></div>;
@@ -345,25 +367,15 @@ function FeedTab() {
           <h4 className="text-sm font-bold" style={{ color: C.text }}>피드 종료</h4>
           <p className="text-xs" style={{ color: C.muted }}>피드를 마감하고 리포트 단계로 전환합니다</p>
         </div>
-        <div className="flex gap-2">
-          <button
-            onClick={handleEndFeed}
-            disabled={isEnding || ctx.phase !== "feed"}
-            className="px-5 py-2.5 rounded-lg text-[10px] font-bold uppercase tracking-wider flex items-center gap-2 transition-all hover:opacity-80 disabled:opacity-40"
-            style={{ backgroundColor: C.danger, color: "#fff" }}
-          >
-            {isEnding ? <Loader2 size={14} className="animate-spin" /> : <StopCircle size={14} />}
-            {isEnding ? "전환 중..." : "피드 종료 → 리포트"}
-          </button>
-          <button
-            onClick={() => router.push("/admin/hub/reports")}
-            className="px-5 py-2.5 rounded-lg text-[10px] font-bold uppercase tracking-wider flex items-center gap-2 transition-all hover:opacity-80"
-            style={{ backgroundColor: C.accent, color: "#fff" }}
-          >
-            <FileText size={14} />
-            1on1 리포트 발행
-          </button>
-        </div>
+        <button
+          onClick={handleEndFeed}
+          disabled={isEnding || ctx.phase !== "feed"}
+          className="px-5 py-2.5 rounded-lg text-[10px] font-bold uppercase tracking-wider flex items-center gap-2 transition-all hover:opacity-80 disabled:opacity-40"
+          style={{ backgroundColor: C.danger, color: "#fff" }}
+        >
+          {isEnding ? <Loader2 size={14} className="animate-spin" /> : <StopCircle size={14} />}
+          {isEnding ? "매칭 생성 중..." : "피드 종료 → 리포트"}
+        </button>
       </div>
 
       {/* Stats */}
