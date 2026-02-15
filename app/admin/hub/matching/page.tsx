@@ -347,10 +347,7 @@ function FeedTab() {
       // 2. 매칭 성공 후 phase 전환
       const ok = await ctx.changePhase("report");
       setIsEnding(false);
-      if (ok) {
-        alert(`매칭 완료! ${matchData.matches_created}개 생성 → 리포트 단계로 전환합니다.`);
-        router.push("/admin/hub/reports");
-      }
+      if (ok) router.push("/admin/hub/reports");
     } catch (err: any) {
       alert(`오류: ${err.message}`);
       setIsEnding(false);

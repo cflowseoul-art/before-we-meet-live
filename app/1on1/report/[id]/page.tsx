@@ -420,8 +420,20 @@ export default function UserReportPage({ params }: { params: any }) {
         const row = payload.new as { key: string; value: string };
         if (row.key !== 'active_feedback_round') return;
 
-        const round = parseInt(row.value);
+        // JSON 형식 (targets 포함) 또는 단순 숫자 호환
+        let round: number;
+        let targets: string[] = [];
+        try {
+          const parsed = JSON.parse(row.value);
+          round = parseInt(parsed.round);
+          targets = parsed.targets || [];
+        } catch {
+          round = parseInt(row.value);
+        }
         if (isNaN(round) || round <= 0) return;
+
+        // 타겟 필터: targets가 비어있으면 전체, 아니면 내 ID가 포함된 경우만
+        if (targets.length > 0 && !targets.includes(userId)) return;
 
         // Skip if already submitted
         if (submittedRounds.has(round)) return;

@@ -25,7 +25,6 @@ const C = {
 export default function ReportsPage() {
   const ctx = useAdminSession();
   const [hasCelebrated, setHasCelebrated] = useState(false);
-  const [matchCount, setMatchCount] = useState(0);
 
   // ─── Timer ───
   const [timerMinutes, setTimerMinutes] = useState(5);
@@ -38,6 +37,10 @@ export default function ReportsPage() {
   const [selectedRound, setSelectedRound] = useState<number | null>(null);
   const [isSending, setIsSending] = useState(false);
   const [feedbackSent, setFeedbackSent] = useState(false);
+
+  // ─── User Selection ───
+  const [sessionUsers, setSessionUsers] = useState<{ id: string; nickname: string; gender: string }[]>([]);
+  const [selectedUserIds, setSelectedUserIds] = useState<Set<string>>(new Set());
 
   // ─── Session End ───
   const [isEndingSession, setIsEndingSession] = useState(false);
@@ -175,13 +178,17 @@ export default function ReportsPage() {
   }, [isTimerFinished]);
 
   const handleSendFeedback = useCallback(async () => {
-    if (selectedRound === null || isSending) return;
+    if (selectedRound === null || isSending || selectedUserIds.size === 0) return;
     setIsSending(true);
     try {
+      const allSelected = selectedUserIds.size === sessionUsers.length;
       const res = await fetch("/api/admin/feedback-round", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ round: String(selectedRound) }),
+        body: JSON.stringify({
+          round: String(selectedRound),
+          targetUserIds: allSelected ? [] : Array.from(selectedUserIds),
+        }),
       });
       const data = await res.json();
       if (data.success) setFeedbackSent(true);
@@ -190,7 +197,7 @@ export default function ReportsPage() {
     } finally {
       setIsSending(false);
     }
-  }, [selectedRound, isSending]);
+  }, [selectedRound, isSending, selectedUserIds, sessionUsers.length]);
 
   const handleMinutesChange = useCallback((v: number) => {
     const nv = Math.max(1, Math.min(60, v));
@@ -230,20 +237,33 @@ export default function ReportsPage() {
   }, [isEndingSession, ctx]);
 
   // ════════════════════════════════════════
+  // Fetch Session Users
+  // ════════════════════════════════════════
+
+  useEffect(() => {
+    const sessionId = `${ctx.sessionDate}_${ctx.sessionNum}`;
+    if (!sessionId || ctx.isLoading) return;
+    const fetchUsers = async () => {
+      const { data } = await supabase
+        .from("users")
+        .select("id, nickname, gender")
+        .eq("session_id", sessionId)
+        .order("gender")
+        .order("nickname");
+      if (data) {
+        setSessionUsers(data);
+        setSelectedUserIds(new Set(data.map(u => u.id)));
+      }
+    };
+    fetchUsers();
+  }, [ctx.sessionDate, ctx.sessionNum, ctx.isLoading]);
+
+  // ════════════════════════════════════════
   // Init
   // ════════════════════════════════════════
 
   useEffect(() => {
-    const fetchMatchCount = async () => {
-      const { count } = await supabase.from("matches").select("*", { count: "exact", head: true });
-      setMatchCount(count || 0);
-    };
-    fetchMatchCount();
-    const ch = supabase.channel("hub_report_count")
-      .on("postgres_changes", { event: "*", schema: "public", table: "matches" }, fetchMatchCount)
-      .subscribe();
     return () => {
-      supabase.removeChannel(ch);
       if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
     };
   }, []);
@@ -265,9 +285,6 @@ export default function ReportsPage() {
             <Heart size={32} style={{ color: C.accent }} fill={C.accent} />
           </div>
           <h3 className="text-xl font-bold mb-1" style={{ color: C.text }}>매칭이 완료되었습니다</h3>
-          <p className="text-sm" style={{ color: C.muted }}>
-            <span className="font-bold" style={{ color: C.warning }}>{matchCount}</span> 매칭 생성됨
-          </p>
         </div>
 
         <button
@@ -316,29 +333,20 @@ export default function ReportsPage() {
           </button>
         </div>
 
-        {isTimerRunning && (
-          <button
-            onClick={() => { setShowFeedbackModal(true); setFeedbackSent(false); setSelectedRound(null); }}
-            className="mt-4 w-full py-2.5 rounded-lg border text-sm font-bold flex items-center justify-center gap-2 transition-all hover:opacity-80"
-            style={{ borderColor: "#8B5CF640", color: "#8B5CF6" }}
-          >
-            <MessageCircle size={14} /> 인연의 잔상 수동 발송
-          </button>
-        )}
-
         {isTimerFinished && (
-          <div className="mt-4 space-y-2">
-            <div className="p-4 rounded-lg flex items-center justify-center gap-2" style={{ backgroundColor: `${C.danger}20`, color: C.danger }}>
-              <Volume2 size={18} className="animate-pulse" />
-              <span className="font-bold text-sm">대화 시간이 종료되었습니다</span>
-            </div>
-            {!showFeedbackModal && (
-              <button onClick={() => { setShowFeedbackModal(true); setFeedbackSent(false); setSelectedRound(null); }} className="w-full py-3 rounded-lg font-bold text-sm flex items-center justify-center gap-2" style={{ backgroundColor: "#8B5CF6", color: "#fff" }}>
-                <MessageCircle size={16} /> 인연의 잔상 발송하기
-              </button>
-            )}
+          <div className="mt-4 p-4 rounded-lg flex items-center justify-center gap-2" style={{ backgroundColor: `${C.danger}20`, color: C.danger }}>
+            <Volume2 size={18} className="animate-pulse" />
+            <span className="font-bold text-sm">대화 시간이 종료되었습니다</span>
           </div>
         )}
+
+        <button
+          onClick={() => { setShowFeedbackModal(true); setFeedbackSent(false); setSelectedRound(null); }}
+          className="mt-4 w-full py-3 rounded-lg font-bold text-sm flex items-center justify-center gap-2 transition-all hover:opacity-80"
+          style={{ backgroundColor: "#8B5CF6", color: "#fff" }}
+        >
+          <MessageCircle size={16} /> 인연의 잔상 수동 발송
+        </button>
       </section>
 
       {/* ─── Session End ─── */}
@@ -385,9 +393,10 @@ export default function ReportsPage() {
                   <MessageCircle size={24} style={{ color: "#8B5CF6" }} />
                 </div>
                 <h3 className="text-lg font-bold mb-1" style={{ color: C.text }}>인연의 잔상</h3>
-                <p className="text-sm mb-5" style={{ color: C.muted }}>방금 종료된 대화는 몇 번째 인연이었나요?</p>
+                <p className="text-sm mb-4" style={{ color: C.muted }}>몇 번째 인연인지, 누구에게 보낼지 선택하세요</p>
 
-                <div className="grid grid-cols-5 gap-2 mb-5">
+                {/* 라운드 선택 */}
+                <div className="grid grid-cols-5 gap-2 mb-4">
                   {[1, 2, 3, 4, 5].map((round) => (
                     <button key={round} onClick={() => setSelectedRound(round)} className="py-3 rounded-lg font-bold text-lg transition-all" style={{
                       backgroundColor: selectedRound === round ? "#8B5CF6" : `${C.text}10`,
@@ -398,14 +407,53 @@ export default function ReportsPage() {
                   ))}
                 </div>
 
+                {/* 유저 선택 */}
+                <div className="text-left mb-4">
+                  <label className="flex items-center gap-2 py-2 px-3 rounded-lg cursor-pointer transition-all hover:opacity-80" style={{ backgroundColor: `${C.text}08` }}>
+                    <input
+                      type="checkbox"
+                      checked={selectedUserIds.size === sessionUsers.length && sessionUsers.length > 0}
+                      onChange={(e) => {
+                        if (e.target.checked) setSelectedUserIds(new Set(sessionUsers.map(u => u.id)));
+                        else setSelectedUserIds(new Set());
+                      }}
+                      className="w-4 h-4 accent-[#8B5CF6]"
+                    />
+                    <span className="text-sm font-bold" style={{ color: C.text }}>전체 선택</span>
+                    <span className="text-xs ml-auto" style={{ color: C.muted }}>{selectedUserIds.size}/{sessionUsers.length}</span>
+                  </label>
+                  <div className="max-h-40 overflow-y-auto mt-2 space-y-1 px-1">
+                    {sessionUsers.map((u) => (
+                      <label key={u.id} className="flex items-center gap-2 py-1.5 px-2 rounded cursor-pointer transition-all hover:opacity-80" style={{ backgroundColor: selectedUserIds.has(u.id) ? `#8B5CF610` : "transparent" }}>
+                        <input
+                          type="checkbox"
+                          checked={selectedUserIds.has(u.id)}
+                          onChange={(e) => {
+                            const next = new Set(selectedUserIds);
+                            if (e.target.checked) next.add(u.id);
+                            else next.delete(u.id);
+                            setSelectedUserIds(next);
+                          }}
+                          className="w-3.5 h-3.5 accent-[#8B5CF6]"
+                        />
+                        <span className="text-xs font-bold px-1.5 py-0.5 rounded" style={{
+                          backgroundColor: u.gender === "남성" ? "#3B82F620" : "#EC489820",
+                          color: u.gender === "남성" ? "#60A5FA" : "#F472B6",
+                        }}>{u.gender === "남성" ? "♂" : "♀"}</span>
+                        <span className="text-sm" style={{ color: C.text }}>{u.nickname}</span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+
                 {!feedbackSent ? (
-                  <button onClick={handleSendFeedback} disabled={selectedRound === null || isSending} className="w-full py-3.5 rounded-lg font-bold text-sm flex items-center justify-center gap-2 transition-all disabled:opacity-30" style={{ backgroundColor: selectedRound ? "#8B5CF6" : `${C.text}10`, color: selectedRound ? "#fff" : C.muted }}>
+                  <button onClick={handleSendFeedback} disabled={selectedRound === null || isSending || selectedUserIds.size === 0} className="w-full py-3.5 rounded-lg font-bold text-sm flex items-center justify-center gap-2 transition-all disabled:opacity-30" style={{ backgroundColor: selectedRound && selectedUserIds.size > 0 ? "#8B5CF6" : `${C.text}10`, color: selectedRound && selectedUserIds.size > 0 ? "#fff" : C.muted }}>
                     {isSending ? <Loader2 size={16} className="animate-spin" /> : <Send size={16} />}
-                    {isSending ? "발송 중..." : `${selectedRound ? selectedRound + "회차 " : ""}인연의 잔상 발송`}
+                    {isSending ? "발송 중..." : `${selectedRound ? selectedRound + "회차 " : ""}인연의 잔상 발송 (${selectedUserIds.size}명)`}
                   </button>
                 ) : (
                   <div className="w-full py-3.5 rounded-lg font-bold text-sm flex items-center justify-center gap-2" style={{ backgroundColor: `${C.success}20`, color: C.success }}>
-                    <Check size={16} /> {selectedRound}회차 발송 완료
+                    <Check size={16} /> {selectedRound}회차 발송 완료 ({selectedUserIds.size}명)
                   </div>
                 )}
 
