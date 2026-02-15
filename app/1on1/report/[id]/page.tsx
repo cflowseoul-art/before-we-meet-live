@@ -435,9 +435,6 @@ export default function UserReportPage({ params }: { params: any }) {
         // 타겟 필터: targets가 비어있으면 전체, 아니면 내 ID가 포함된 경우만
         if (targets.length > 0 && !targets.includes(userId)) return;
 
-        // Skip if already submitted
-        if (submittedRounds.has(round)) return;
-
         // Find partner for this round (round-1 index in solarPartners, sorted by score desc)
         const partnerIndex = round - 1;
         if (partnerIndex >= solarPartners.length) return;
@@ -456,7 +453,7 @@ export default function UserReportPage({ params }: { params: any }) {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [userId, solarPartners, submittedRounds]);
+  }, [userId, solarPartners]);
 
   // Realtime listener for final report dispatch
   useEffect(() => {

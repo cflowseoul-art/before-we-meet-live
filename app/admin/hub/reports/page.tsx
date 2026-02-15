@@ -446,16 +446,15 @@ export default function ReportsPage() {
                   </div>
                 </div>
 
-                {!feedbackSent ? (
-                  <button onClick={handleSendFeedback} disabled={selectedRound === null || isSending || selectedUserIds.size === 0} className="w-full py-3.5 rounded-lg font-bold text-sm flex items-center justify-center gap-2 transition-all disabled:opacity-30" style={{ backgroundColor: selectedRound && selectedUserIds.size > 0 ? "#8B5CF6" : `${C.text}10`, color: selectedRound && selectedUserIds.size > 0 ? "#fff" : C.muted }}>
-                    {isSending ? <Loader2 size={16} className="animate-spin" /> : <Send size={16} />}
-                    {isSending ? "발송 중..." : `${selectedRound ? selectedRound + "회차 " : ""}인연의 잔상 발송 (${selectedUserIds.size}명)`}
-                  </button>
-                ) : (
-                  <div className="w-full py-3.5 rounded-lg font-bold text-sm flex items-center justify-center gap-2" style={{ backgroundColor: `${C.success}20`, color: C.success }}>
-                    <Check size={16} /> {selectedRound}회차 발송 완료 ({selectedUserIds.size}명)
+                {feedbackSent && (
+                  <div className="w-full py-2 rounded-lg text-sm flex items-center justify-center gap-2 mb-2" style={{ backgroundColor: `${C.success}20`, color: C.success }}>
+                    <Check size={14} /> {selectedRound}회차 발송 완료
                   </div>
                 )}
+                <button onClick={() => { setFeedbackSent(false); handleSendFeedback(); }} disabled={selectedRound === null || isSending || selectedUserIds.size === 0} className="w-full py-3.5 rounded-lg font-bold text-sm flex items-center justify-center gap-2 transition-all disabled:opacity-30" style={{ backgroundColor: selectedRound && selectedUserIds.size > 0 ? "#8B5CF6" : `${C.text}10`, color: selectedRound && selectedUserIds.size > 0 ? "#fff" : C.muted }}>
+                  {isSending ? <Loader2 size={16} className="animate-spin" /> : <Send size={16} />}
+                  {isSending ? "발송 중..." : `${selectedRound ? selectedRound + "회차 " : ""}${feedbackSent ? "재발송" : "발송"} (${selectedUserIds.size}명)`}
+                </button>
 
                 <button onClick={() => setShowFeedbackModal(false)} className="mt-3 text-sm transition-all" style={{ color: C.muted }}>닫기</button>
               </div>
